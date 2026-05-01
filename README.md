@@ -10,13 +10,13 @@ Also I have made a demo video which you guys can check that essentially explains
 
 # Usage
 
-For Web peers just go to my deployed [github_page](https://trulynotafan.github.io/p2p-news-app/) and the hosted relay would work and let you join.
+For Web peers just go to my deployed [github_page](https://af44n.github.io/p2p-news-app/) and the hosted relay would work and let you join.
 
 But if you want to try it manually:
 
 
 Clone the repository:
-```git clone https://github.com/trulynotafan/p2p-news-app```
+```git clone https://github.com/af44n/p2p-news-app```
 
 ## Install bare
 
@@ -75,7 +75,7 @@ The native peer will also join the same topic, and you will see diffrent option 
 
 <img width="322" height="151" alt="image" src="https://github.com/user-attachments/assets/ab4b0ce6-f41f-47e2-b63c-59f806552650" />
 
-If you want to see the flow of the code and how everything was made step by step check out the dev diary and for quick go through, check [code_explanation](https://github.com/trulynotafan/p2p-news-app/blob/main/docs/code_explanation.md)
+If you want to see the flow of the code and how everything was made step by step check out the dev diary and for quick go through, check [code_explanation](https://github.com/af44n/p2p-news-app/blob/main/docs/code_explanation.md)
 
 
 
