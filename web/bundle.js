@@ -4083,21 +4083,20 @@ const net_helper = require('net_helper')
 
 module.exports = newsfeed_card_list
 
-async function newsfeed_card_list (opts, protocol) {
+async function newsfeed_card_list (opts, invite) {
   const { sid } = opts
   const { id, sdb } = await get(sid)
 
   const { io, _ } = net_helper(id)
   io.on.card_list = io_card_list()
+  io.on.feed = io_feed()
+  if (invite) io.accept(invite)
 
   const el = document.createElement('div')
   el.className = 'newsfeed-list'
 
   const card_sends = []
   const card_els = []
-  let send_to_parent
-
-  if (protocol) send_to_parent = protocol(handle_message)
 
   const subs = await sdb.watch(onbatch)
   const card_subs = (subs || []).sort(sort_by_index)
@@ -4110,8 +4109,12 @@ async function newsfeed_card_list (opts, protocol) {
 
   return el
 
-  function handle_message (msg) {
-    if (msg.type === 'provision') update_cards(msg.data)
+  function io_feed () {
+    const on = { provision: on_provision }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_provision (m) { update_cards(m.data) }
   }
 
   function io_card_list () {
@@ -4120,9 +4123,7 @@ async function newsfeed_card_list (opts, protocol) {
     function handler (m) { (on[m.type] || on_fail)(m) }
     function on_fail () { }
     function on_card_clicked (m) {
-      if (send_to_parent) {
-        send_to_parent({ type: 'card_clicked', data: m.data })
-      }
+      _.feed('card_clicked', {}, m.data)
     }
   }
 
@@ -4225,12 +4226,13 @@ const statedb = STATE(__filename)
 
 const { get } = statedb(fallback_module)
 const news_list = require('newsfeed_card_list')
+const net_helper = require('net_helper')
 
 module.exports = newsfeed_view
 
 async function newsfeed_view (opts, protocol) {
   const { sid } = opts
-  const { sdb } = await get(sid)
+  const { id, sdb } = await get(sid)
 
   let send_to_parent
 
@@ -4241,43 +4243,44 @@ async function newsfeed_view (opts, protocol) {
 
   if (protocol) send_to_parent = protocol(handle_message)
 
+  const { io, _ } = net_helper(id)
+  io.on.list = io_list()
+
   const element = document.createElement('div')
 
   let list_el = null
-  let send_to_list = null
 
   const subs = await sdb.watch(handle_watch)
   const list_sub = subs && subs.length > 0 ? subs[0] : null
 
   if (list_sub) {
-    list_el = await news_list({ sid: list_sub.sid }, list_protocol)
+    list_el = await news_list({ sid: list_sub.sid }, io.invite('list', { feed: id }))
   }
 
   element.addEventListener('click', handle_element_click)
 
   return element
 
-  function list_protocol (child_handler) {
-    send_to_list = child_handler
-    return handle_list_message
-  }
-
-  function handle_list_message (msg) {
-    if (msg.type === 'card_clicked' && send_to_parent) {
-      send_to_parent({ type: 'select_node', data: { instance_path: msg.data.path } })
+  function io_list () {
+    const on = { card_clicked: on_card_clicked }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_card_clicked (m) {
+      if (send_to_parent) {
+        send_to_parent({ type: 'select_node', data: { instance_path: m.data.path } })
+      }
     }
   }
 
   function show_feed (data) {
-    clear_element()
+    element.innerHTML = ''
     if (list_el) element.appendChild(list_el)
-    if (send_to_list) {
-      send_to_list({ type: 'provision', data: data })
-    }
+    _.list('provision', {}, data)
   }
 
   function show_article (payload) {
-    clear_element()
+    element.innerHTML = ''
     const data = payload.data || payload
     const content_html = (data.content || '')
       .split('\n\n')
@@ -4298,10 +4301,6 @@ async function newsfeed_view (opts, protocol) {
         <div class="article-body">${content_html}</div>
       </article>
     `
-  }
-
-  function clear_element () {
-    while (element.firstChild) element.removeChild(element.firstChild)
   }
 
   function handle_element_click (e) {
@@ -4340,7 +4339,8 @@ async function newsfeed_view (opts, protocol) {
 
 function fallback_module () {
   const _ = {
-    newsfeed_card_list: { $: '' }
+    newsfeed_card_list: { $: '' },
+    net_helper: { $: '' }
   }
 
   return { _, api: fallback_instance }
@@ -4364,7 +4364,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/newsfeed_view/index.js")
-},{"STATE":1,"newsfeed_card_list":8}],11:[function(require,module,exports){
+},{"STATE":1,"net_helper":4,"newsfeed_card_list":8}],11:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
