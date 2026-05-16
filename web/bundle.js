@@ -3458,10 +3458,10 @@ async function news_app (opts, protocol) {
   let db = null
   let msg_id = 0
   let send_to_sidebar = null
-  let send_to_newsfeed = null
 
   const { io, _ } = net_helper(by)
   io.on.write = io_write()
+  io.on.newsfeed = io_newsfeed()
 
   let active_path = ''
   let active_tab = 'news'
@@ -3507,7 +3507,7 @@ async function news_app (opts, protocol) {
     sidebar_el.appendChild(menu_el)
   }
 
-  newsfeed_el = await newsfeed_view({ sid: subs[1].sid }, newsfeed_protocol)
+  newsfeed_el = await newsfeed_view({ sid: subs[1].sid }, io.invite('newsfeed', { news: by }))
   write_el = await write_page({ sid: subs[2].sid }, io.invite('write', { news: by }))
 
   render_main_view()
@@ -3572,19 +3572,13 @@ async function news_app (opts, protocol) {
     }
   }
 
-  function newsfeed_protocol (child_handler) {
-    send_to_newsfeed = child_handler
-    return on_newsfeed_message
-  }
-
-  function on_newsfeed_message (msg) {
-    const { type, data } = msg
-    if (type === 'select_node') {
-      render_article_view(data.instance_path)
-    }
-    if (type === 'navigate_back') {
-      render_content(active_path)
-    }
+  function io_newsfeed () {
+    const on = { select_node: on_select_node, navigate_back: on_navigate_back }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_select_node (m) { render_article_view(m.data.instance_path) }
+    function on_navigate_back () { render_content(active_path) }
   }
 
   function io_write () {
@@ -3775,12 +3769,7 @@ async function news_app (opts, protocol) {
 
   function render_feed_view ({ items, folder_name, target }) {
     target.appendChild(newsfeed_el)
-    if (send_to_newsfeed) {
-      send_to_newsfeed({
-        type: 'render_feed',
-        data: { items: items, folder_name: folder_name, is_news_feed: true }
-      })
-    }
+    _.newsfeed('render_feed', {}, { items: items, folder_name: folder_name, is_news_feed: true })
   }
 
   async function render_article_view (post_path) {
@@ -3791,19 +3780,14 @@ async function news_app (opts, protocol) {
     }
     main_viewer.innerHTML = ''
     main_viewer.appendChild(newsfeed_el)
-    if (send_to_newsfeed) {
-      send_to_newsfeed({
-        type: 'render_article',
-        data: {
-          data: {
-            title: post_data.title,
-            author: post_data.author,
-            date: post_data.date,
-            content: post_data.content
-          }
-        }
-      })
-    }
+    _.newsfeed('render_article', {}, {
+      data: {
+        title: post_data.title,
+        author: post_data.author,
+        date: post_data.date,
+        content: post_data.content
+      }
+    })
   }
 
   function render_write_page_view (path) {
@@ -4230,21 +4214,14 @@ const net_helper = require('net_helper')
 
 module.exports = newsfeed_view
 
-async function newsfeed_view (opts, protocol) {
+async function newsfeed_view (opts, invite) {
   const { sid } = opts
   const { id, sdb } = await get(sid)
 
-  let send_to_parent
-
-  function handle_message (msg) {
-    if (msg.type === 'render_feed') show_feed(msg.data)
-    if (msg.type === 'render_article') show_article(msg.data)
-  }
-
-  if (protocol) send_to_parent = protocol(handle_message)
-
   const { io, _ } = net_helper(id)
+  io.on.news = io_news()
   io.on.list = io_list()
+  if (invite) io.accept(invite)
 
   const element = document.createElement('div')
 
@@ -4261,15 +4238,22 @@ async function newsfeed_view (opts, protocol) {
 
   return element
 
+  function io_news () {
+    const on = { render_feed: on_render_feed, render_article: on_render_article }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_render_feed (m) { show_feed(m.data) }
+    function on_render_article (m) { show_article(m.data) }
+  }
+
   function io_list () {
     const on = { card_clicked: on_card_clicked }
     return protocol
     function protocol (m) { (on[m.type] || on_fail)(m) }
     function on_fail () { }
     function on_card_clicked (m) {
-      if (send_to_parent) {
-        send_to_parent({ type: 'select_node', data: { instance_path: m.data.path } })
-      }
+      _.news('select_node', {}, { instance_path: m.data.path })
     }
   }
 
@@ -4304,13 +4288,13 @@ async function newsfeed_view (opts, protocol) {
   }
 
   function handle_element_click (e) {
-    if (e.target.closest('.back-btn') && send_to_parent) {
+    if (e.target.closest('.back-btn')) {
       handle_back_click()
     }
   }
 
   function handle_back_click () {
-    send_to_parent({ type: 'navigate_back' })
+    _.news('navigate_back')
   }
 
   function handle_watch () {}
