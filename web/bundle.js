@@ -3327,6 +3327,63 @@ function fallback_module () {
 
 }).call(this)}).call(this,"/web/node_modules/menu_sidebar/index.js")
 },{"STATE":1,"graph-explorer":2}],4:[function(require,module,exports){
+(function (__filename){(function (){
+module.exports = net
+
+function net (id) {
+  const [label, _, sub, hub] = [`[${id}@${__filename}]`, {}, {}, {}]
+  const io = { invite, accept, on: {} }
+  return { io, _ }
+  function forward (to, M) {
+    for (const id of Object.keys(sub)) if (to.startsWith(id)) return sub[id].tx(M)
+    for (const id of Object.keys(hub)) if (to.startsWith(id)) hub[id].tx(M)
+    console.error(`[id] ${label} - cant forward to unknown recipient "${to}"`)
+  }
+  function invite (name, ids) {
+    if (!io.on[name]) throw new Error(`${label} no protocol handler for "${name}"`)
+    return Object.assign(invite, { ids })
+    function invite (tx) {
+      const rx = router(sub)
+      add(name, tx, tx.id, rx, sub)
+      return rx
+    }
+  }
+  function accept (invite) {
+    const rx = router(hub)
+    const tx = invite(Object.assign(rx, { id }))
+    for (const [name, to] of Object.entries(invite.ids)) {
+      if (hub[to]) throw new Error(`${label} already connected to "${to}"`)
+      if (!io.on[name]) throw new Error(`${label} no "${name}" protocol for "${to}"`)
+      add(name, tx, to, rx, hub)
+    }
+  }
+  function router ($) {
+    return function rx (M) {
+      const { head: [by, to, mid] } = M
+      console.log(`[by] ${by}\n[to] ${to}\n[id]`, M)
+      if (to !== id) return forward(to, M)
+      if (!$[by]) throw new Error(`${label} unknown sender "${by}"`)
+      const { name } = $[by].state
+      if (!io.on[name]) throw new Error(`${label} no "${name}" protocol for "${to}"`)
+      io.on[name](M)
+    }
+  }
+  function add (name, tx, to, rx, $) {
+    const { state } = $[to] = { rx, tx, state: { name, to, mid: 0 } }
+    _[name] = send
+    function send (type, refs, data) {
+      if (refs === undefined) refs = {}
+      if (data === undefined) data = null
+      const head = [id, to, state.mid++]
+      const meta = { time: Date.now(), stack: (new Error().stack) }
+      tx({ head, refs, type, data, meta })
+      return head
+    }
+  }
+}
+
+}).call(this)}).call(this,"/web/node_modules/net_helper/index.js")
+},{}],5:[function(require,module,exports){
 module.exports = graphdb
 
 function graphdb (entries) {
@@ -3377,7 +3434,7 @@ function graphdb (entries) {
   }
 }
 
-},{}],5:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3388,6 +3445,7 @@ const newsfeed_view = require('newsfeed_view')
 const write_page = require('write_page')
 const content_parser = require('newsfeed_view/content_parser')
 const graphdb = require('./graphdb')
+const net_helper = require('net_helper')
 
 module.exports = news_app
 
@@ -3400,8 +3458,10 @@ async function news_app (opts, protocol) {
   let db = null
   let msg_id = 0
   let send_to_sidebar = null
-  let send_to_newsfeed = null
-  let send_to_write = null
+
+  const { io, _ } = net_helper(by)
+  io.on.write = io_write()
+  io.on.newsfeed = io_newsfeed()
 
   let active_path = ''
   let active_tab = 'news'
@@ -3447,8 +3507,8 @@ async function news_app (opts, protocol) {
     sidebar_el.appendChild(menu_el)
   }
 
-  newsfeed_el = await newsfeed_view({ sid: subs[1].sid }, newsfeed_protocol)
-  write_el = await write_page({ sid: subs[2].sid }, write_protocol_factory)
+  newsfeed_el = await newsfeed_view({ sid: subs[1].sid }, io.invite('newsfeed', { news: by }))
+  write_el = await write_page({ sid: subs[2].sid }, io.invite('write', { news: by }))
 
   render_main_view()
 
@@ -3512,24 +3572,20 @@ async function news_app (opts, protocol) {
     }
   }
 
-  function newsfeed_protocol (child_handler) {
-    send_to_newsfeed = child_handler
-    return on_newsfeed_message
+  function io_newsfeed () {
+    const on = { select_node: on_select_node, navigate_back: on_navigate_back }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_select_node (m) { render_article_view(m.data.instance_path) }
+    function on_navigate_back () { render_content(active_path) }
   }
 
-  function on_newsfeed_message (msg) {
-    const { type, data } = msg
-    if (type === 'select_node') {
-      render_article_view(data.instance_path)
-    }
-    if (type === 'navigate_back') {
-      render_content(active_path)
-    }
-  }
-
-  function write_protocol_factory (child_handler) {
-    send_to_write = child_handler
-    return function on_write_message () {}
+  function io_write () {
+    const on = {}
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
   }
 
   function handle_shadow_click (e) {
@@ -3713,12 +3769,7 @@ async function news_app (opts, protocol) {
 
   function render_feed_view ({ items, folder_name, target }) {
     target.appendChild(newsfeed_el)
-    if (send_to_newsfeed) {
-      send_to_newsfeed({
-        type: 'render_feed',
-        data: { items: items, folder_name: folder_name, is_news_feed: true }
-      })
-    }
+    _.newsfeed('render_feed', {}, { items: items, folder_name: folder_name, is_news_feed: true })
   }
 
   async function render_article_view (post_path) {
@@ -3729,27 +3780,20 @@ async function news_app (opts, protocol) {
     }
     main_viewer.innerHTML = ''
     main_viewer.appendChild(newsfeed_el)
-    if (send_to_newsfeed) {
-      send_to_newsfeed({
-        type: 'render_article',
-        data: {
-          data: {
-            title: post_data.title,
-            author: post_data.author,
-            date: post_data.date,
-            content: post_data.content
-          }
-        }
-      })
-    }
+    _.newsfeed('render_article', {}, {
+      data: {
+        title: post_data.title,
+        author: post_data.author,
+        date: post_data.date,
+        content: post_data.content
+      }
+    })
   }
 
   function render_write_page_view (path) {
     const node = db ? db.get(path) : null
     const blog_name = node ? node.name : 'Main Blog'
-    if (send_to_write) {
-      send_to_write({ type: 'provision', data: { selected_blog: blog_name } })
-    }
+    _.write('provision', {}, { selected_blog: blog_name })
     main_viewer.innerHTML = ''
     main_viewer.appendChild(write_el)
   }
@@ -3816,7 +3860,8 @@ function fallback_module () {
     newsfeed_view: { $: '' },
     write_page: { $: '' },
     './graphdb': { $: '' },
-    'newsfeed_view/content_parser': { $: '' }
+    'newsfeed_view/content_parser': { $: '' },
+    net_helper: { $: '' }
   }
 
   return { _, api: fallback_instance }
@@ -3920,36 +3965,42 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news/index.js")
-},{"./graphdb":4,"STATE":1,"menu_sidebar":3,"newsfeed_view":9,"newsfeed_view/content_parser":8,"write_page":10}],6:[function(require,module,exports){
+},{"./graphdb":5,"STATE":1,"menu_sidebar":3,"net_helper":4,"newsfeed_view":10,"newsfeed_view/content_parser":9,"write_page":11}],7:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 
 const { get } = statedb(fallback_module)
+const net_helper = require('net_helper')
 
 module.exports = news_cards
 
-async function news_cards (opts, protocol) {
+async function news_cards (opts, invite) {
   const { sid } = opts
-  await get(sid)
+  const { id } = await get(sid)
+
+  const { io, _ } = net_helper(id)
+  io.on.card_list = io_card_list()
+  if (invite) io.accept(invite)
 
   const el = document.createElement('div')
   let current_path = ''
-  let send
-
-  function handle_message (msg) {
-    if (msg.type === 'provision') render(msg.data)
-  }
-
-  if (protocol) send = protocol(handle_message)
 
   el.addEventListener('click', handle_card_click)
 
   return el
 
+  function io_card_list () {
+    const on = { provision: on_provision }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_provision (m) { render(m.data) }
+  }
+
   function handle_card_click () {
-    if (send && current_path) {
-      send({ type: 'card_clicked', data: { path: current_path } })
+    if (current_path) {
+      _.card_list('card_clicked', {}, { path: current_path })
     }
   }
 
@@ -3988,7 +4039,11 @@ async function news_cards (opts, protocol) {
 }
 
 function fallback_module () {
-  return { api: fallback_instance }
+  const _ = {
+    net_helper: { $: '' }
+  }
+
+  return { _, api: fallback_instance }
 
   function fallback_instance () {
     const drive = {
@@ -4001,64 +4056,69 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news_cards/index.js")
-},{"STATE":1}],7:[function(require,module,exports){
+},{"STATE":1,"net_helper":4}],8:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 
 const { get } = statedb(fallback_module)
 const news_cards = require('news_cards')
+const net_helper = require('net_helper')
 
 module.exports = newsfeed_card_list
 
-async function newsfeed_card_list (opts, protocol) {
+async function newsfeed_card_list (opts, invite) {
   const { sid } = opts
-  const { sdb } = await get(sid)
+  const { id, sdb } = await get(sid)
+
+  const { io, _ } = net_helper(id)
+  io.on.card_list = io_card_list()
+  io.on.feed = io_feed()
+  if (invite) io.accept(invite)
 
   const el = document.createElement('div')
   el.className = 'newsfeed-list'
 
   const card_sends = []
   const card_els = []
-  let send_to_parent
-
-  function handle_message (msg) {
-    if (msg.type === 'provision') update_cards(msg.data)
-  }
-
-  if (protocol) send_to_parent = protocol(handle_message)
 
   const subs = await sdb.watch(onbatch)
   const card_subs = (subs || []).sort(sort_by_index)
 
   for (let i = 0; i < card_subs.length; i++) {
-    const card_el = await news_cards({ sid: card_subs[i].sid }, make_card_protocol(i))
+    const card_el = await news_cards({ sid: card_subs[i].sid }, io.invite('card_list', { card_list: id }))
     card_els.push(card_el)
+    card_sends[i] = _.card_list
   }
 
   return el
 
-  function make_card_protocol (idx) {
-    return function card_protocol (child_handler) {
-      card_sends[idx] = child_handler
-      return handle_card_message
-    }
+  function io_feed () {
+    const on = { provision: on_provision }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_provision (m) { update_cards(m.data) }
   }
 
-  function handle_card_message (msg) {
-    if (msg.type === 'card_clicked' && send_to_parent) {
-      send_to_parent({ type: 'card_clicked', data: msg.data })
+  function io_card_list () {
+    const on = { card_clicked: on_card_clicked }
+    return handler
+    function handler (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_card_clicked (m) {
+      _.feed('card_clicked', {}, m.data)
     }
   }
 
   function update_cards (payload) {
     const items = payload.items || []
 
-    while (el.firstChild) el.removeChild(el.firstChild)
+    el.innerHTML = ''
 
     for (let i = 0; i < items.length && i < card_els.length; i++) {
       if (card_sends[i]) {
-        card_sends[i]({ type: 'provision', data: { data: items[i].data, path: items[i].path } })
+        card_sends[i]('provision', {}, { data: items[i].data, path: items[i].path })
       }
       el.appendChild(card_els[i])
     }
@@ -4073,7 +4133,8 @@ async function newsfeed_card_list (opts, protocol) {
 
 function fallback_module () {
   const _ = {
-    news_cards: { $: '' }
+    news_cards: { $: '' },
+    net_helper: { $: '' }
   }
 
   return { _, api: fallback_instance }
@@ -4100,7 +4161,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/newsfeed_card_list/index.js")
-},{"STATE":1,"news_cards":6}],8:[function(require,module,exports){
+},{"STATE":1,"net_helper":4,"news_cards":7}],9:[function(require,module,exports){
 const STATE = require('STATE')
 
 module.exports = content_parser
@@ -4142,66 +4203,68 @@ async function content_parser (opts, protocol) {
   }
 }
 
-},{"STATE":1}],9:[function(require,module,exports){
+},{"STATE":1}],10:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 
 const { get } = statedb(fallback_module)
 const news_list = require('newsfeed_card_list')
+const net_helper = require('net_helper')
 
 module.exports = newsfeed_view
 
-async function newsfeed_view (opts, protocol) {
+async function newsfeed_view (opts, invite) {
   const { sid } = opts
-  const { sdb } = await get(sid)
+  const { id, sdb } = await get(sid)
 
-  let send_to_parent
-
-  function handle_message (msg) {
-    if (msg.type === 'render_feed') show_feed(msg.data)
-    if (msg.type === 'render_article') show_article(msg.data)
-  }
-
-  if (protocol) send_to_parent = protocol(handle_message)
+  const { io, _ } = net_helper(id)
+  io.on.news = io_news()
+  io.on.list = io_list()
+  if (invite) io.accept(invite)
 
   const element = document.createElement('div')
 
   let list_el = null
-  let send_to_list = null
 
   const subs = await sdb.watch(handle_watch)
   const list_sub = subs && subs.length > 0 ? subs[0] : null
 
   if (list_sub) {
-    list_el = await news_list({ sid: list_sub.sid }, list_protocol)
+    list_el = await news_list({ sid: list_sub.sid }, io.invite('list', { feed: id }))
   }
 
   element.addEventListener('click', handle_element_click)
 
   return element
 
-  function list_protocol (child_handler) {
-    send_to_list = child_handler
-    return handle_list_message
+  function io_news () {
+    const on = { render_feed: on_render_feed, render_article: on_render_article }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_render_feed (m) { show_feed(m.data) }
+    function on_render_article (m) { show_article(m.data) }
   }
 
-  function handle_list_message (msg) {
-    if (msg.type === 'card_clicked' && send_to_parent) {
-      send_to_parent({ type: 'select_node', data: { instance_path: msg.data.path } })
+  function io_list () {
+    const on = { card_clicked: on_card_clicked }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_card_clicked (m) {
+      _.news('select_node', {}, { instance_path: m.data.path })
     }
   }
 
   function show_feed (data) {
-    clear_element()
+    element.innerHTML = ''
     if (list_el) element.appendChild(list_el)
-    if (send_to_list) {
-      send_to_list({ type: 'provision', data: data })
-    }
+    _.list('provision', {}, data)
   }
 
   function show_article (payload) {
-    clear_element()
+    element.innerHTML = ''
     const data = payload.data || payload
     const content_html = (data.content || '')
       .split('\n\n')
@@ -4224,18 +4287,14 @@ async function newsfeed_view (opts, protocol) {
     `
   }
 
-  function clear_element () {
-    while (element.firstChild) element.removeChild(element.firstChild)
-  }
-
   function handle_element_click (e) {
-    if (e.target.closest('.back-btn') && send_to_parent) {
+    if (e.target.closest('.back-btn')) {
       handle_back_click()
     }
   }
 
   function handle_back_click () {
-    send_to_parent({ type: 'navigate_back' })
+    _.news('navigate_back')
   }
 
   function handle_watch () {}
@@ -4264,7 +4323,8 @@ async function newsfeed_view (opts, protocol) {
 
 function fallback_module () {
   const _ = {
-    newsfeed_card_list: { $: '' }
+    newsfeed_card_list: { $: '' },
+    net_helper: { $: '' }
   }
 
   return { _, api: fallback_instance }
@@ -4288,29 +4348,36 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/newsfeed_view/index.js")
-},{"STATE":1,"newsfeed_card_list":7}],10:[function(require,module,exports){
+},{"STATE":1,"net_helper":4,"newsfeed_card_list":8}],11:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 const { get } = statedb(fallback_module)
+const net_helper = require('net_helper')
 
 module.exports = write_page
 
-async function write_page (opts, protocol) {
+async function write_page (opts, invite) {
   const { sid } = opts
-  await get(sid)
+  const { id } = await get(sid)
+
+  const { io } = net_helper(id)
+  io.on.news = io_news()
+  if (invite) io.accept(invite)
 
   const el = document.createElement('div')
-
-  function handle_message (msg) {
-    if (msg.type === 'provision') update_form(msg.data)
-  }
-
-  if (protocol) protocol(handle_message)
 
   render_form('Main Blog')
 
   return el
+
+  function io_news () {
+    const on = { provision: on_provision }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_provision (m) { update_form(m.data) }
+  }
 
   function render_form (blog_name) {
     el.innerHTML = `
@@ -4364,7 +4431,11 @@ async function write_page (opts, protocol) {
 }
 
 function fallback_module () {
-  return { api: fallback_instance }
+  const _ = {
+    net_helper: { $: '' }
+  }
+
+  return { _, api: fallback_instance }
 
   function fallback_instance () {
     const drive = {
@@ -4377,7 +4448,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/write_page/index.js")
-},{"STATE":1}],11:[function(require,module,exports){
+},{"STATE":1,"net_helper":4}],12:[function(require,module,exports){
 (function (__filename){(function (){
 localStorage.clear()
 const STATE = require('STATE')
@@ -4425,7 +4496,8 @@ function fallback_module () {
             newsfeed_view: { $: '' },
             write_page: { $: '' },
             './graphdb': { $: '' },
-            'newsfeed_view/content_parser': { $: '' }
+            'newsfeed_view/content_parser': { $: '' },
+            net_helper: { $: '' }
           }
         },
         mapping: {
@@ -4463,4 +4535,4 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/page.js")
-},{"STATE":1,"news":5}]},{},[11]);
+},{"STATE":1,"news":6}]},{},[12]);
