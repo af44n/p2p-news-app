@@ -3692,8 +3692,8 @@ async function news_app (opts, protocol) {
     if (node_type !== 'discover') {
       tabs_html = `
         <div class="view-tabs">
-          <button class="tab ${active_tab === 'news' ? 'active' : ''}">News</button>
-          <button class="tab ${active_tab === 'blog' ? 'active' : ''}">Blog</button>
+          <button class="tab tab-news ${active_tab === 'news' ? 'active' : ''}">News</button>
+          <button class="tab tab-blog ${active_tab === 'blog' ? 'active' : ''}">Blog</button>
         </div>
       `
     }
@@ -3736,7 +3736,7 @@ async function news_app (opts, protocol) {
     }
 
     if (fetched_items.length > 0) {
-      render_feed_view({ items: fetched_items, folder_name: node.name, target: target })
+      render_feed_view({ items: fetched_items, folder_name: node.name, target: target, is_news_feed: true })
     } else {
       target.innerHTML = '<div class="empty-container"><p>No news to show from subscriptions.</p></div>'
     }
@@ -3758,7 +3758,7 @@ async function news_app (opts, protocol) {
     }
 
     if (fetched_items.length > 0 || node_type === 'my-blog') {
-      render_feed_view({ items: fetched_items, folder_name: node.name, target: target })
+      render_feed_view({ items: fetched_items, folder_name: node.name, target: target, is_news_feed: false })
       if (node_type === 'my-blog') {
         target.insertAdjacentHTML('beforeend', '<div class="news-fab">+</div>')
       }
@@ -3767,9 +3767,9 @@ async function news_app (opts, protocol) {
     }
   }
 
-  function render_feed_view ({ items, folder_name, target }) {
+  function render_feed_view ({ items, folder_name, target, is_news_feed }) {
     target.appendChild(newsfeed_el)
-    _.newsfeed('render_feed', {}, { items: items, folder_name: folder_name, is_news_feed: true })
+    _.newsfeed('render_feed', {}, { items: items, folder_name: folder_name, is_news_feed: is_news_feed })
   }
 
   async function render_article_view (post_path) {
@@ -4007,24 +4007,32 @@ async function news_cards (opts, invite) {
   function render (card_data) {
     const data = card_data.data || {}
     current_path = card_data.path || ''
-    const date = data.date || ''
-    const title = data.title || 'Untitled Story'
+    const is_news = card_data.is_news_feed !== false
+
+    if (is_news) {
+      render_news_card(data)
+    } else {
+      render_blog_card(data)
+    }
+  }
+
+  function render_news_card (data) {
     const author = data.author || 'Anonymous'
-    const description = data.description || ''
     const tags = Array.isArray(data.tags) ? data.tags : []
     const tags_html = tags.map(render_tag).join('')
 
     el.innerHTML = `
-      <div class="news-card">
+      <div class="news-card news-mode">
+        <div class="news-accent"></div>
         <div class="news-avatar">${author[0] || 'A'}</div>
         <div class="news-content">
           <div class="news-meta-top">
             <span class="news-author">${author}</span>
-            <span class="news-separator">•</span>
-            <span class="news-date-text">${date}</span>
+            <span class="news-separator">·</span>
+            <span class="news-date-text">${data.date || ''}</span>
           </div>
-          <h3 class="news-title">${title}</h3>
-          <p class="news-description">${description}</p>
+          <h3 class="news-title">${data.title || 'Untitled'}</h3>
+          <p class="news-description">${data.description || ''}</p>
           <div class="news-meta-bottom">
             <div class="news-tags">${tags_html}</div>
           </div>
@@ -4033,8 +4041,50 @@ async function news_cards (opts, invite) {
     `
   }
 
+  function render_blog_card (data) {
+    const author = data.author || 'Anonymous'
+    const read_time = estimate_read_time(data.content || data.description || '')
+    const date_formatted = format_blog_date(data.date || '')
+    const has_image = data.image && data.image.length > 0
+    const image_html = has_image
+      ? `<div class="blog-hero"><img class="blog-hero-img" src="${data.image}" alt="" /></div>`
+      : ''
+
+    el.innerHTML = `
+      <div class="blog-card blog-mode">
+        <div class="blog-accent"></div>
+        ${image_html}
+        <div class="blog-body">
+          <div class="blog-date-line">
+            <span class="blog-date">${date_formatted}</span>
+          </div>
+          <h3 class="blog-title">${data.title || 'Untitled'}</h3>
+          <p class="blog-excerpt">${data.description || ''}</p>
+          <div class="blog-footer">
+            <div class="blog-author-line">
+              <div class="blog-author-avatar">${author[0] || 'A'}</div>
+              <span class="blog-author-name">${author}</span>
+            </div>
+            <span class="blog-read-time">${read_time} min read</span>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
   function render_tag (tag) {
-    return `<span class="news-tag-pill">${tag}</span>`
+    return `<span class="news-tag-pill">#${tag}</span>`
+  }
+
+  function estimate_read_time (text) {
+    return Math.max(1, Math.ceil((text.split(/\s+/).length) / 200))
+  }
+
+  function format_blog_date (date_str) {
+    if (!date_str) return ''
+    const d = new Date(date_str)
+    if (isNaN(d)) return date_str
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 }
 
@@ -4113,12 +4163,13 @@ async function newsfeed_card_list (opts, invite) {
 
   function update_cards (payload) {
     const items = payload.items || []
+    const is_news_feed = payload.is_news_feed !== false
 
     el.innerHTML = ''
 
     for (let i = 0; i < items.length && i < card_els.length; i++) {
       if (card_sends[i]) {
-        card_sends[i]('provision', {}, { data: items[i].data, path: items[i].path })
+        card_sends[i]('provision', {}, { data: items[i].data, path: items[i].path, is_news_feed: is_news_feed })
       }
       el.appendChild(card_els[i])
     }
@@ -4183,7 +4234,7 @@ async function content_parser (opts, protocol) {
 
     if (in_frontmatter) {
       const { key, value } = parse_metadata_line(line)
-      if (key) metadata[key] = value
+      if (key) metadata[key] = parse_value(key, value)
     } else {
       content += line + '\n'
     }
@@ -4200,6 +4251,28 @@ async function content_parser (opts, protocol) {
     const key = parts[0].trim()
     const value = parts.slice(1).join(':').trim()
     return { key, value }
+  }
+
+  function parse_value (key, value) {
+    if (key === 'tags') return parse_tags(value)
+    return value
+  }
+
+  function parse_tags (value) {
+    const match = value.match(/\[([^\]]*)\]/)
+    if (!match) return []
+    return match[1]
+      .split(',')
+      .map(strip_tag)
+      .filter(filter_empty)
+  }
+
+  function strip_tag (t) {
+    return t.trim().replace(/^["']|["']$/g, '').replace(/^#/, '')
+  }
+
+  function filter_empty (t) {
+    return t.length > 0
   }
 }
 
@@ -4273,7 +4346,7 @@ async function newsfeed_view (opts, invite) {
 
     element.innerHTML = `
       <article class="news-container">
-        <button class="back-btn">← Back to feed</button>
+        <button class="back-btn"><span class="back-icon">←</span> Back to feed</button>
         <header class="news-header">
           <div>
             <h2 class="news-title article-title-main">${data.title || 'Untitled'}</h2>
