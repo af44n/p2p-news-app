@@ -3778,7 +3778,7 @@ async function news_app (opts, protocol) {
       main_viewer.innerHTML = '<div class="empty-container"><p>Content not available.</p></div>'
       return
     }
-    main_viewer.innerHTML = ''
+    main_viewer.replaceChildren()
     main_viewer.appendChild(newsfeed_el)
     _.newsfeed('render_article', {}, {
       data: {
@@ -3794,7 +3794,7 @@ async function news_app (opts, protocol) {
     const node = db ? db.get(path) : null
     const blog_name = node ? node.name : 'Main Blog'
     _.write('provision', {}, { selected_blog: blog_name })
-    main_viewer.innerHTML = ''
+    main_viewer.replaceChildren()
     main_viewer.appendChild(write_el)
   }
 
@@ -4122,7 +4122,6 @@ async function newsfeed_card_list (opts, invite) {
   const { id, sdb } = await get(sid)
 
   const { io, _ } = net_helper(id)
-  io.on.card_list = io_card_list()
   io.on.feed = io_feed()
   if (invite) io.accept(invite)
 
@@ -4136,9 +4135,11 @@ async function newsfeed_card_list (opts, invite) {
   const card_subs = (subs || []).sort(sort_by_index)
 
   for (let i = 0; i < card_subs.length; i++) {
-    const card_el = await news_cards({ sid: card_subs[i].sid }, io.invite('card_list', { card_list: id }))
+    const name = 'card_list_' + i
+    io.on[name] = io_card_list()
+    const card_el = await news_cards({ sid: card_subs[i].sid }, io.invite(name, { card_list: id }))
     card_els.push(card_el)
-    card_sends[i] = _.card_list
+    card_sends[i] = _[name]
   }
 
   return el
@@ -4165,7 +4166,7 @@ async function newsfeed_card_list (opts, invite) {
     const items = payload.items || []
     const is_news_feed = payload.is_news_feed !== false
 
-    el.innerHTML = ''
+    el.replaceChildren()
 
     for (let i = 0; i < items.length && i < card_els.length; i++) {
       if (card_sends[i]) {
@@ -4331,13 +4332,13 @@ async function newsfeed_view (opts, invite) {
   }
 
   function show_feed (data) {
-    element.innerHTML = ''
+    element.replaceChildren()
     if (list_el) element.appendChild(list_el)
     _.list('provision', {}, data)
   }
 
   function show_article (payload) {
-    element.innerHTML = ''
+    element.replaceChildren()
     const data = payload.data || payload
     const content_html = (data.content || '')
       .split('\n\n')
@@ -4553,7 +4554,7 @@ async function init () {
   const { sid } = start[0]
 
   const app = await news({ sid, vault: custom_vault })
-  document.body.innerHTML = ''
+  document.body.replaceChildren()
   document.body.append(app)
 }
 

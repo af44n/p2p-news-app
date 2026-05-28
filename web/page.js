@@ -28,7 +28,7 @@ async function init () {
   const { sid } = start[0]
 
   const app = await news({ sid, vault: custom_vault })
-  document.body.innerHTML = ''
+  document.body.replaceChildren()
   document.body.append(app)
 }
 
