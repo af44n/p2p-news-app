@@ -51,15 +51,13 @@ async function handle_seed () {
   try {
     container.querySelector('.status').textContent = 'Creating account...'
     vault.session_set_username(username)
-    vault.session_set_auth_mode('seed')
     // currently we only have p2p-news-app, so hard code it
     vault.session_set_joined_app(username + ':p2p-news-app')
     // Show system bar
     show_system_bar()
     // Authenticate via vault
     await vault.authenticate({
-      username: username,
-      mode: 'seed'
+      username: username
     })
   } catch (err) {
     container.querySelector('.status').textContent = 'Error: ' + err.message
@@ -86,10 +84,7 @@ async function handle_pair () {
     container.querySelector('.cancel-pair-btn').addEventListener('click', handle_cancel_pair)
     // Store invite code for app to use
     vault.session_set_pending_invite(invite_code)
-    vault.session_set_auth_mode('pair')
-    // For now, use placeholder username
-    const username = 'pairing-user'
-    vault.session_set_username(username)
+    
     let overlay = null
     // Listen for vault_ready event (fires when vault is paired but before user resolves)
     vault.on_vault_ready(handle_vault_ready)
@@ -112,8 +107,7 @@ async function handle_pair () {
       await discover_and_show_apps()
     }
     vault.authenticate({
-      username: username,
-      mode: 'pair',
+      username: 'pairing-user', // in-memory placeholder
       invite_code: invite_code,
       on_verification_code: handle_verification_code
     })
@@ -255,25 +249,22 @@ container.querySelector('.reset-all-btn').addEventListener('click', handle_reset
 AUTO-AUTHENTICATION CHECK
 ***************************************/
 const existing_username = vault.session_get_username()
-const auth_mode = vault.session_get_auth_mode()
 const joined_app = vault.session_get_joined_app()
 const pending_invite_code = vault.session_get_pending_invite()
 
-// auto authenticate if user has joined an app, or show app picker if exited
-// so we could switch between apps
-if (existing_username && joined_app) {
-  show_system_bar()
-  vault.authenticate({ username: existing_username, mode: auth_mode })
-} else if (existing_username && auth_mode === 'pair' && pending_invite_code) {
+if (pending_invite_code) {
   // Device B refresh: resume interrupted pairing with the stored invite code
   container.querySelector('.join-form').style.display = 'block'
   container.querySelector('.initial-buttons').style.display = 'none'
   container.querySelector('.invite-code-input').value = pending_invite_code
   handle_pair()
+} else if (existing_username && joined_app) {
+  show_system_bar()
+  vault.authenticate({ username: existing_username })
 } else if (existing_username) {
   show_system_bar()
   vault.on_vault_ready(show_app_selection)
-  vault.authenticate({ username: existing_username, mode: auth_mode, defer_resolve: true })
+  vault.authenticate({ username: existing_username, defer_resolve: true })
 }
 
 /***************************************
@@ -453,6 +444,7 @@ function show_system_bar () {
     })
   })
   vault.on_update(function () {
+    render_device_header(vault)
     if (active_tab === 'devices') load_devices()
     if (active_tab === 'relays') load_relays()
     if (active_tab === 'apps') load_apps_mgmt()
@@ -489,7 +481,7 @@ function show_system_bar () {
 
       for (const d of devices) {
         if (own && d.vault_bee_writer === own) continue
-        if (d.last_online && (Date.now() - d.last_online > ms_in_month) && !d.exempt_from_removal) {
+        if (d.last_online && (Date.now() - d.last_online > ms_in_month)) {
           const device_policy = d.dead_device_policy || 'prompt'
           if (device_policy === 'auto_remove') {
             await vault.remove_device(d)
@@ -519,7 +511,7 @@ function show_system_bar () {
 
         const is_dead = !is_self && d.last_online && (Date.now() - d.last_online > ms_in_month)
         const dead_indicator = is_dead ? '<span style="color:red;margin-left:5px;font-weight:bold">DEAD (>30 days)</span>' : ''
-        const exempt_str = d.exempt_from_removal ? 'checked' : ''
+        const removed_indicator = d.removed ? '<span style="color:orange;margin-left:5px;font-weight:bold">REMOVED</span>' : ''
         const last_online_str = d.last_online ? new Date(d.last_online).toLocaleString() : 'Never'
 
         const policy = d.dead_device_policy || 'prompt'
@@ -528,13 +520,14 @@ function show_system_bar () {
           '<option value="auto_remove"' + (policy === 'auto_remove' ? ' selected' : '') + '>Auto-Remove</option>' +
           '</select>'
 
-        div.innerHTML = '<strong>' + (d.name || '?') + '</strong>' +
-          (is_self ? ' (This Device)' : '') + dead_indicator + '<br>' +
+        div.innerHTML = '<strong' + (d.removed ? ' style="text-decoration:line-through;opacity:0.6"' : '') + '>' + (d.name || '?') + '</strong>' +
+          (!d.removed ? ' <button class="rename-device-btn" data-device-id="' + (d.vault_bee_writer || '') + '" style="font-size:10px;padding:0px 4px;margin-left:4px">Rename</button>' : '') +
+          (is_self ? ' <span style="font-size:10px;color:#007bff">(This Device)</span>' : '') + dead_indicator + removed_indicator + '<br>' +
           '<small>Added: ' + (d.added_date || '') + ' | Last online: ' + last_online_str + '</small>' +
           '<details><summary>Keys</summary><pre style="font-size:10px;white-space:pre-wrap;word-break:break-all;margin:2px 0">' + keys + '</pre></details>' +
-          '<div style="margin-top:4px"><label style="margin-right:10px"><input type="checkbox" class="exempt-device-cb" data-device-id="' + (d.vault_bee_writer || '') + '" ' + exempt_str + '> Exempt</label>' +
-          'Policy: ' + policy_html + ' ' +
-          (is_self ? '' : '<button class="remove-device-btn" data-device-id="' + (d.vault_bee_writer || '') + '">Remove</button>') + '</div>'
+          '<div style="margin-top:4px">' +
+          (!d.removed ? 'Policy: ' + policy_html + ' ' : '') +
+          (is_self || d.removed ? '' : '<button class="remove-device-btn" data-device-id="' + (d.vault_bee_writer || '') + '">Remove</button>') + '</div>'
         el.appendChild(div)
       }
     } catch (err) { el.textContent = 'Error: ' + err.message }
@@ -552,13 +545,25 @@ function show_system_bar () {
     }
 
     if (t.classList.contains('remove-device-btn')) {
-      if (!confirm('Remove this device?')) return
+      const conf = prompt('Are you sure you want to remove this device? Type "yes" to confirm:')
+      if (conf !== 'yes') return
       t.disabled = true
       vault.get_paired_devices().then(function (devs) {
         const dev = devs.find(function (d) { return d.vault_bee_writer === t.dataset.deviceId })
         if (!dev) { alert('Not found'); return }
         vault.remove_device(dev).then(function (ok) { if (ok) load_devices() })
       })
+    }
+    if (t.classList.contains('rename-device-btn')) {
+      const new_name = prompt('Enter a new name or nickname for this device:')
+      if (new_name !== null && new_name.trim() !== '') {
+        vault.get_paired_devices().then(function (devs) {
+          const dev = devs.find(function (d) { return d.vault_bee_writer === t.dataset.deviceId })
+          if (!dev) return
+          dev.name = new_name.trim()
+          vault.vault_put('paired_devices/' + dev.vault_bee_writer, dev).then(load_devices)
+        })
+      }
     }
     if (t.classList.contains('cancel-invite-btn')) handle_cancel_invite()
     if (t.classList.contains('relay-add-btn')) handle_relay_add()
@@ -572,13 +577,6 @@ function show_system_bar () {
 
   function handle_panel_change (e) {
     const t = e.target
-    if (t.classList.contains('exempt-device-cb')) {
-      vault.vault_get(`paired_devices/${t.dataset.deviceId}`).then(function (dev) {
-        if (!dev) return
-        dev.exempt_from_removal = t.checked
-        vault.vault_put(`paired_devices/${t.dataset.deviceId}`, dev).then(() => load_devices())
-      })
-    }
     if (t.classList.contains('dead-policy-sel')) {
       vault.vault_get(`paired_devices/${t.dataset.deviceId}`).then(function (dev) {
         if (!dev) return
@@ -826,6 +824,42 @@ function show_system_bar () {
       el.querySelector('.copy-btn').textContent = 'Copied!'
     })
   }
+
+  vault.on_malicious_device?.(async function (writer_key) {
+    const devs = await vault.get_paired_devices()
+    const dev = devs.find(function (d) { return d.vault_audit_writer === writer_key || d.app_audit_writer === writer_key })
+    // cant let anyone forge audit logs
+    const name = dev ? dev.name : writer_key.slice(0, 8)
+    if (confirm('malicious activity detected from device [' + name + ']. Would you like to remove this device?')) {
+      if (dev) {
+        await vault.remove_device(dev)
+        alert('Device [' + name + '] removed.')
+      } else {
+        alert('Device not found in paired devices.')
+      }
+    }
+  })
+
+  render_device_header(vault)
+}
+
+/***************************************
+RENDER DEVICE HEADER
+***************************************/
+async function render_device_header (vault) {
+  const vbw = vault.get_vault_bee()?.base?.local?.key
+  if (!vbw) return
+  const vbw_hex = vbw.toString('hex')
+  const device = await vault.vault_get('paired_devices/' + vbw_hex)
+  const device_name = device?.name || 'Unknown Device'
+  let header = document.querySelector('#global-device-header')
+  if (!header) {
+    header = document.createElement('div')
+    header.id = 'global-device-header'
+    header.style.cssText = 'background:#f5f5f5;color:#333;font-size:11px;padding:4px 10px;z-index:9999;font-family:monospace;text-align:center;border-bottom:1px solid #ccc'
+    document.body.insertBefore(header, document.body.firstChild)
+  }
+  header.textContent = '🖥️ Active Device: ' + device_name
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)

@@ -3,7 +3,7 @@
 // Loads identity module and executes app code with identity vault
 
 ;(globalThis.open
-  ? boot(loadweb, inputweb('system.js', 'bundle.js'))
+  ? boot(loadweb, inputweb('system.bundle.js', 'bundle.js'))
   : boot(loadcli, inputcli('./clisys-ui.js', './cliapp-ui.js'))
 ).catch(onerror)
 
@@ -157,6 +157,12 @@ function create_auditcore (options) {
           // Silently ignore persistence errors
         })
       }
+      if (state.base.view.malicious && state.base.view.malicious.length > 0) {
+        for (const key of state.base.view.malicious) {
+          emitter.emit('malicious_device', key)
+        }
+        state.base.view.malicious = []
+      }
     }
     emitter.emit('update')
   }
@@ -228,8 +234,7 @@ INTERNAL FUNCTIONS
       type: entry.type,
       data: {
         ...entry.data || {},
-        timestamp: Date.now(),
-        device_id: state.base.local ? b4a.toString(state.base.local.key, 'hex') : null
+        timestamp: Date.now()
       }
     }
     await state.base.append(full_entry)
@@ -329,7 +334,16 @@ async function handle_autobase_apply (nodes, view, base) {
     } else if (type === 'remove_writer') {
       await base.removeWriter(b4a.from(data.key, 'hex'))
     } else {
-      view.entries.push(node.value)
+      const writer_key = b4a.toString(node.from.key, 'hex')
+      if (data && data.device_id && data.device_id !== writer_key) {
+        // make sure the device is legit
+        view.malicious = view.malicious || []
+        if (!view.malicious.includes(writer_key)) view.malicious.push(writer_key)
+        continue
+      }
+      const entry = { ...node.value }
+      entry.data = { ...entry.data, device_id: writer_key }
+      view.entries.push(entry)
     }
   }
 }
@@ -1211,6 +1225,7 @@ IDENTITY NETWORK — own devices only
 async function network (store, mnemonic_data, relay_url) {
   await store.ready()
   const swarm = await create_swarm(mnemonic_data, relay_url)
+  if (!swarm) return { swarm: null }
   await swarm.listen()
   console.log('[identity] swarm joined')
   // for now its replicating the entire store, but this connection is only between our own devices
@@ -1229,6 +1244,7 @@ APP NETWORK — vault-filtered swarm for apps
 async function create_app_network (store, relay_url) {
   const is_vault_core = store._is_vault_core
   const swarm = await create_swarm(null, relay_url)
+  if (!swarm) return { swarm: null, replicate: function () {} }
   const peer_streams = []
 
   store.on('core-open', function (core) {
@@ -1308,9 +1324,12 @@ async function create_swarm (mnemonic_data, relay_url) {
     const is_dev = location.hostname === 'localhost' || location.hostname.startsWith('192.') || location.hostname.startsWith('10.')
     relay_url = is_dev ? 'ws://localhost:8080' : 'relay-production-0dd8.up.railway.app'
   }
-  return new Promise(function (resolve, reject) {
+  return new Promise(function (resolve) {
     const ws = new WebSocket(relay_url)
-    ws.addEventListener('error', reject)
+    ws.addEventListener('error', function (err) {
+      console.warn('[identity-networking] WebSocket relay error, running offline', err)
+      resolve(null)
+    })
     ws.addEventListener('open', function () {
       const opts = mnemonic_data
         ? { dht: new DHT(new Stream(true, ws)), keyPair: mnemonic_data.keypair }
@@ -1398,6 +1417,7 @@ function create_vault_ops (get_state) {
         const audit_key = b4a.toString(app_audit.key, 'hex')
         await state.vault_audit.append({ type: 'app_audit_linked', data: { app_id, audit_key } })
       }
+      app_audit.on('malicious_device', function (key) { state.emitter.emit('malicious_device', key) })
       app_config.registered_at = Date.now()
       app_config.audit_key = b4a.toString(app_audit.key, 'hex')
       await state.vault_bee.put(`apps/${app_id}`, app_config)
@@ -1420,6 +1440,7 @@ function create_vault_ops (get_state) {
       bootstrap: b4a.from(audit_key, 'hex')
     })
     await app_audit.ready()
+    app_audit.on('malicious_device', function (key) { get_state().emitter.emit('malicious_device', key) })
     state.app_audits.set(app_id, app_audit)
     return app_audit
   }
@@ -1550,9 +1571,12 @@ function create_vault_ops (get_state) {
           try { await state.ds_manager.remove_writer(name, writer_key) } catch (err) { console.warn(`Failed to remove writer from ${name}:`, err.message) }
         }
       }
-      // Delete by vault_bee_writer
+      // Delete by vault_bee_writer - wait, keep the name and flag as removed instead
       const del_key = device.vault_bee_writer || device.metadata_writer
-      if (del_key) await vault_del(`paired_devices/${del_key}`)
+      if (del_key) {
+        const existing = await vault_get(`paired_devices/${del_key}`)
+        if (existing) await vault_put(`paired_devices/${del_key}`, { ...existing, removed: true })
+      }
       state.emitter.emit('update')
       return true
     } catch (err) {
@@ -1855,6 +1879,7 @@ async function extract_files (drive, name) {
 }
 
 },{"auditcore":2,"b4a":114}],9:[function(require,module,exports){
+(function (process){(function (){
 // Identity module which is app independent
 // This module handles: keypairs, pairing, networking, data structures
 // Doesnt contain app-specific things
@@ -1984,14 +2009,13 @@ function identity (config = {}) {
     network: create_app_network_with_relay,
     // Events
     on_update: handle_update_callback,
+    on_malicious_device: handle_malicious_device_callback,
     on_vault_ready
   }
   // sessio api is system-only used here but never forwarded to apps
   const session_api = {
     session_get_username,
     session_set_username,
-    session_get_auth_mode,
-    session_set_auth_mode,
     session_get_joined_app,
     session_set_joined_app,
     session_get_pending_invite,
@@ -2009,14 +2033,15 @@ INTERNAL FUNCTIONS
   // Authenticate is called by the App's UI. It autheticates the user based on the mode.
   // If user is new, it resolves quickly. If not, it sets up networking to handle pairing.
   async function authenticate (auth_data) {
-    const { username, mode, invite_code, on_verification_code } = auth_data
+    const { username, invite_code, on_verification_code, defer_resolve } = auth_data
     try {
-      if (mode === 'pair' && invite_code) {
+      if (invite_code) {
         const invite_data = parse_vault_invite(invite_code)
         const mnemonic_data = await user_promise
         state.keypair = mnemonic_data
         const relay_url = await get_default_relay()
         const { swarm: swarm_instance } = await network(store, mnemonic_data, relay_url)
+        if (!swarm_instance) throw new Error('Cannot pair device while offline (Relay unreachable).')
         state.store = store
         state.swarm = swarm_instance
         state.pairing_manager = pairing_manager_constructor(state.swarm)
@@ -2031,8 +2056,7 @@ INTERNAL FUNCTIONS
         })
         session_clear_pending_invite() // pairing complete, remove stored invite from session
         state.pending_auth = {
-          username: result.username || username,
-          mode
+          username: result.username || username
         }
         vault.ping_liveness()
         state.emitter.emit('vault_ready', state.pending_auth)
@@ -2046,18 +2070,20 @@ INTERNAL FUNCTIONS
       const relay_url = await get_default_relay()
       const { swarm } = await network(store, mnemonic_data, relay_url)
       // Reconnect to known devices + store new device keys
-      const known = await get_other_device_keys(mnemonic_data.keypair.publicKey)
-      for (const key of known) swarm.joinPeer(key)
-      swarm.on('connection', (socket) => store_device_noise_key(b4a.toString(socket.remotePublicKey, 'hex')))
+      if (swarm) {
+        const known = await get_other_device_keys(mnemonic_data.keypair.publicKey)
+        for (const key of known) swarm.joinPeer(key)
+        swarm.on('connection', (socket) => store_device_noise_key(b4a.toString(socket.remotePublicKey, 'hex')))
+      }
       state.store = store
       state.swarm = swarm
       vault.ping_liveness()
-      if (auth_data.defer_resolve) {
-        state.pending_auth = { username, mode }
+      if (defer_resolve) {
+        state.pending_auth = { username }
         state.emitter.emit('vault_ready', state.pending_auth)
         return
       }
-      if (user_resolve) user_resolve(make_app_vault(username, mode))
+      if (user_resolve) user_resolve(make_app_vault(username))
     } catch (err) {
       console.error('[identity] Authentication error:', err)
       if (user_reject) user_reject(err)
@@ -2066,7 +2092,7 @@ INTERNAL FUNCTIONS
 
   function complete_authentication () {
     if (!state.pending_auth) return
-    if (user_resolve) user_resolve(make_app_vault(state.pending_auth.username, state.pending_auth.mode))
+    if (user_resolve) user_resolve(make_app_vault(state.pending_auth.username))
     state.pending_auth = null
   }
 
@@ -2086,8 +2112,12 @@ VAULT STRUCTURE INITIALIZATION
       store: _store.namespace('vault-audit'),
       bootstrap: vault_audit_key ? b4a.from(vault_audit_key, 'hex') : null
     })
-    state.vault_bee.on('update', () => state.emitter.emit('update'))
+    state.vault_bee.on('update', () => {
+      check_if_removed()
+      state.emitter.emit('update')
+    })
     state.vault_audit.on('update', () => state.emitter.emit('update'))
+    state.vault_audit.on('malicious_device', (key) => state.emitter.emit('malicious_device', key))
     await state.vault_bee.ready()
     await state.vault_audit.ready()
     // every core that exists now is a vault core
@@ -2095,6 +2125,23 @@ VAULT STRUCTURE INITIALIZATION
       vault_core_keys.add(dk_hex)
     }
     store._is_vault_core = is_vault_core
+  }
+
+  async function check_if_removed () {
+    const vbw = state.vault_bee?.base?.local?.key
+    if (!vbw) return
+    const vbw_hex = b4a.toString(vbw, 'hex')
+    const me = await vault.vault_get(`paired_devices/${vbw_hex}`)
+    if (me && me.removed) {
+      if (typeof window !== 'undefined') {
+        alert('This device has been removed from the network. All local data will now be cleared.')
+      } else {
+        console.log('This device has been removed. Clearing data.')
+      }
+      await reset_all_data()
+      if (typeof location !== 'undefined') location.reload()
+      else process.exit(0)
+    }
   }
 
   /***************************************
@@ -2251,7 +2298,8 @@ GETTERS
 EVENT EMITTER
 ***************************************/
 
-  function handle_update_callback (cb) { return state.emitter.on('update', cb) }
+  function handle_update_callback (cb) { state.emitter.on('update', cb) }
+  function handle_malicious_device_callback (cb) { state.emitter.on('malicious_device', cb) }
   function on_vault_ready (cb) { return state.emitter.on('vault_ready', cb) }
 
   /***************************************
@@ -2259,8 +2307,6 @@ EVENT EMITTER
   ***************************************/
   function session_get_username () { return localStorage.getItem('username') }
   function session_set_username (v) { localStorage.setItem('username', v) }
-  function session_get_auth_mode () { return localStorage.getItem('auth_mode') || 'seed' }
-  function session_set_auth_mode (v) { localStorage.setItem('auth_mode', v) }
   function session_get_joined_app () { return localStorage.getItem('joined_app') || '' }
   function session_set_joined_app (v) { localStorage.setItem('joined_app', v) }
   function session_get_pending_invite () { return localStorage.getItem('pending_invite_code') || null }
@@ -2268,8 +2314,8 @@ EVENT EMITTER
   function session_clear_pending_invite () { localStorage.removeItem('pending_invite_code') }
   function session_clear () { localStorage.clear() }
   // Apps get vault_api only.. no session methods, no localstorage access
-  function make_app_vault (username, mode) {
-    return { ...vault_api, username, mode, authenticated: true }
+  function make_app_vault (username) {
+    return { ...vault_api, username, authenticated: true }
   }
   async function reset_all_data () {
     localStorage.clear()
@@ -2321,7 +2367,8 @@ EVENT EMITTER
   }
 }
 
-},{"auditcore":2,"autobee":3,"b4a":114,"corestore":247,"crypto-helpers":5,"datastructure-manager":6,"identity-networking":7,"identity-operations":8,"pairing-manager":10,"random-access-web":541}],10:[function(require,module,exports){
+}).call(this)}).call(this,require('_process'))
+},{"_process":514,"auditcore":2,"autobee":3,"b4a":114,"corestore":247,"crypto-helpers":5,"datastructure-manager":6,"identity-networking":7,"identity-operations":8,"pairing-manager":10,"random-access-web":541}],10:[function(require,module,exports){
 const b4a = require('b4a')
 const BlindPairing = require('blind-pairing')
 const extend = require('@geut/sodium-javascript-plus/extend')
