@@ -10,6 +10,11 @@ Also I have made a demo video which you guys can check that essentially explains
 
 # Usage
 
+We've added some cool stuff recently:
+- **Offline Mode:** If the relay crashes, the app just falls back to cached data.
+- **Device Management:** You can now give devices petnames, kick them out safely, and see which ones are dead.
+- **Top Bar:** A sticky top bar so you always know who you're logged in as.
+
 For Web peers just go to my deployed [github_page](https://trulynotafan.github.io/p2p-news-app/) and the hosted relay would work and let you join.
 
 But if you want to try it manually:

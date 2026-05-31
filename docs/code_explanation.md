@@ -84,6 +84,10 @@ The app is built on top of the [Hypercore Protocol](https://hypercore-protocol.o
   const store = new Corestore(RAW('blogs-username'))
   ```
 
+### 8. **Auditcore & Datashell Sandboxing**
+- **What:** Security tracking and app sandboxing.
+- **Role:** `Auditcore` keeps a verifiable log of everything happening in the vault. To keep things safe, apps never get raw access to the root vault. The `datashell` wraps it up and provides a sandboxed `app_vault` so apps can only touch their own stuff.
+
 ---
 
 ## Main Files & Their Roles
@@ -250,6 +254,9 @@ server.on('connection', (socket) => {
 - This clears localStorage, IndexedDB, and FileSystem storage.
 - All data is local; nothing is stored on a central server.
 
+### 6. Real-Time Sync & Offline Mode
+- **No More Polling:** Instead of constantly checking for updates, the app listens to native events directly from `Autobee`. When a peer updates their profile or drops a new post, the UI catches the event and re-renders instantly.
+- **Offline Caching:** If your internet drops or the relay server goes offline, the app handles it gracefully. It switches into an offline-cached mode, letting you read your synced posts until the connection comes back.
 
 ---
 

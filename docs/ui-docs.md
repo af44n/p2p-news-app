@@ -366,6 +366,7 @@ Welcome! This doc explains the user interfaces (UI) of the P2P News App for both
 <img width="446" height="363" alt="image" src="https://github.com/user-attachments/assets/6f0fdd47-f0ff-4c1e-9b76-8d00a7067f4c" />
 
 - Shows your username and connection status.
+- **Device Management:** You can assign petnames to devices, check their "liveness" (to see if they are dead/inactive), and safely remove them (it'll ask for confirmation first!).
 - **Reset All Data** button wipes your local data and reloads the app.
 
 <details>
@@ -382,6 +383,9 @@ Welcome! This doc explains the user interfaces (UI) of the P2P News App for both
   }
   ```
 </details>
+
+## Persistent Top Bar
+- We added a sticky top bar across all views so you always know exactly which identity and device you're currently using. Super helpful for multi-tab setups!
 
 ---
 

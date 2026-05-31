@@ -259,8 +259,14 @@ function add_local_subscribed_peer (key) {
     localStorage.setItem('subscribed_peers', JSON.stringify(arr))
   }
 }
-
 ```
+
+### Advanced Device Management & Liveness
+We've stepped up how we track multiple devices under one identity:
+- **Liveness Tracking:** Devices regularly stamp their activity. If a device goes quiet for too long, it gets flagged as "inactive" or "dead." The vault automatically syncs these timestamps across peers to prevent conflicts.
+- **Petnames:** Since hex keys are impossible to remember, you can give your devices friendly names (like "My Laptop").
+- **Recovery Exemptions:** You can mark specific devices as "critical." This protects them from being accidentally removed.
+- **Safe Removal:** If you try to kick a device (or if an automated cleanup tries to), it now forces a "Yes/No" confirmation workflow to prevent disasters.
 
 
 ### Access Control
