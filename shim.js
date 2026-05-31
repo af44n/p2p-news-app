@@ -96,7 +96,8 @@ async function create_app_vault (vault, app_instance_id, profile_name) {
     start_writer_watcher: () => vault.start_writer_watcher(app_instance_id),
     request_writer_access: () => vault.request_writer_access(app_instance_id),
     wait_for_writer_access: () => vault.wait_for_writer_access(app_instance_id),
-    log_bootstrap_device: () => vault.log_bootstrap_device(app_instance_id)
+    log_bootstrap_device: () => vault.log_bootstrap_device(app_instance_id),
+    get_app_status: () => vault.get_app_status(app_instance_id)
   }
 }
 
@@ -1305,7 +1306,7 @@ async function create_swarm (mnemonic_data, relay_url) {
   }
   if (!relay_url) {
     const is_dev = location.hostname === 'localhost' || location.hostname.startsWith('192.') || location.hostname.startsWith('10.')
-    relay_url = is_dev ? 'ws://localhost:8080' : 'wss://relay-production-9c0e.up.railway.app'
+    relay_url = is_dev ? 'ws://localhost:8080' : 'relay-production-0dd8.up.railway.app'
   }
   return new Promise(function (resolve, reject) {
     const ws = new WebSocket(relay_url)
@@ -1352,8 +1353,13 @@ function create_vault_ops (get_state) {
     request_writer_access,
     wait_for_writer_access,
     log_bootstrap_device,
+    // App lifecycle
+    get_app_status,
+    cancel_app_pairing,
     // Raw data inspection
-    get_raw_data
+    get_raw_data,
+    // Device liveness
+    ping_liveness
   }
   return api
 
@@ -1395,6 +1401,8 @@ function create_vault_ops (get_state) {
       app_config.registered_at = Date.now()
       app_config.audit_key = b4a.toString(app_audit.key, 'hex')
       await state.vault_bee.put(`apps/${app_id}`, app_config)
+      const vbw_hex = b4a.toString(state.vault_bee.base.local.key, 'hex')
+      await state.vault_bee.put(`device_apps/${vbw_hex}/${app_id}`, { status: 'joined' })
       return { app_id, registered: true }
     }
   }
@@ -1435,8 +1443,17 @@ function create_vault_ops (get_state) {
     const state = get_state()
     if (!state.vault_bee) return []
     const apps = []
+    const vbw = state.vault_bee.base?.local?.key
+    const vbw_hex = vbw ? b4a.toString(vbw, 'hex') : null
+    
     for await (const entry of state.vault_bee.create_read_stream({ gte: 'apps/', lt: 'apps0' })) {
-      apps.push({ id: entry.key.replace('apps/', ''), ...entry.value })
+      const app_id = entry.key.replace('apps/', '')
+      let status = 'available'
+      if (vbw_hex) {
+        const status_entry = await vault_get(`device_apps/${vbw_hex}/${app_id}`)
+        if (status_entry) status = status_entry.status
+      }
+      apps.push({ id: app_id, status, ...entry.value })
     }
     return apps
   }
@@ -1533,7 +1550,7 @@ function create_vault_ops (get_state) {
           try { await state.ds_manager.remove_writer(name, writer_key) } catch (err) { console.warn(`Failed to remove writer from ${name}:`, err.message) }
         }
       }
-      // Delete by vault_bee_writer 
+      // Delete by vault_bee_writer
       const del_key = device.vault_bee_writer || device.metadata_writer
       if (del_key) await vault_del(`paired_devices/${del_key}`)
       state.emitter.emit('update')
@@ -1541,6 +1558,16 @@ function create_vault_ops (get_state) {
     } catch (err) {
       console.error('Error removing device:', err)
       return false
+    }
+  }
+
+  async function ping_liveness () {
+    const state = get_state()
+    const vbw = state.vault_bee.base?.local?.key
+    const vbw_hex = b4a.toString(vbw, 'hex')
+    const existing = await vault_get(`paired_devices/${vbw_hex}`)
+    if (existing) {
+      await vault_put(`paired_devices/${vbw_hex}`, { ...existing, last_online: Date.now() })
     }
   }
 
@@ -1554,6 +1581,12 @@ function create_vault_ops (get_state) {
   function start_writer_watcher (app_id) {
     const state = get_state()
     if (!state.vault_bee) return
+    
+    // Update the vault view and process any existing requests that were made while we were offline
+    state.vault_bee.update().then(() => {
+      return process_writer_requests()
+    }).catch(err => console.error('[identity] Error processing existing requests:', err))
+    
     const watcher = state.vault_bee.watch({ gte: `writer_requests/${app_id}`, lt: `writer_requests/${app_id}0` })
     watch_writer_requests(watcher)
     async function watch_writer_requests (watcher) {
@@ -1572,6 +1605,9 @@ function create_vault_ops (get_state) {
         req.processed = true
         req.processed_at = Date.now()
         await log_device_pairing(req)
+        if (req.vault_bee_writer) {
+          await vault_put(`device_apps/${req.vault_bee_writer}/${app_id}`, { status: 'joined' })
+        }
       }
       if (processed_any) {
         await vault_put(`writer_requests/${app_id}`, requests)
@@ -1586,7 +1622,7 @@ function create_vault_ops (get_state) {
       const vbw = req.vault_bee_writer
       if (!vbw) return
       const existing = await vault_get(`paired_devices/${vbw}`)
-      await vault_put(`paired_devices/${vbw}`, { ...existing, ...device_keys })
+      await vault_put(`paired_devices/${vbw}`, { ...existing, ...device_keys, last_online: Date.now() })
     }
   }
 
@@ -1629,6 +1665,9 @@ function create_vault_ops (get_state) {
     const requests = await vault_get(`writer_requests/${app_id}`) || []
     requests.push({ writer_keys, vault_bee_writer: vbw_hex, requested_at: Date.now(), processed: false })
     await vault_put(`writer_requests/${app_id}`, requests)
+    if (vbw_hex) {
+      await vault_put(`device_apps/${vbw_hex}/${app_id}`, { status: 'pairing' })
+    }
     return writer_keys
   }
 
@@ -1664,9 +1703,32 @@ function create_vault_ops (get_state) {
     await vault_put(`paired_devices/${vbw}`, {
       name: existing?.value?.name || 'Device 1',
       added_date: existing?.value?.added_date || new Date().toLocaleString(),
+      last_online: existing?.value?.last_online || Date.now(),
       ...(existing?.value || {}),
       ...device_keys
     })
+  }
+
+  /***************************************
+  APP LIFECYCLE MANAGEMENT
+  ***************************************/
+
+  async function get_app_status (app_id) {
+    const state = get_state()
+    const vbw = state.vault_bee?.base?.local?.key
+    const status_obj = await vault_get(`device_apps/${b4a.toString(vbw, 'hex')}/${app_id}`)
+    return status_obj ? status_obj.status : 'available'
+  }
+
+  async function cancel_app_pairing (app_id) {
+    const state = get_state()
+    const vbw = state.vault_bee?.base?.local?.key
+    const vbw_hex = b4a.toString(vbw, 'hex')
+    await vault_put(`device_apps/${vbw_hex}/${app_id}`, { status: 'available' })
+    const requests = await vault_get(`writer_requests/${app_id}`) || []
+    const filtered = requests.filter(r => r.vault_bee_writer !== vbw_hex || r.processed)
+    await vault_put(`writer_requests/${app_id}`, filtered)
+    state.emitter.emit('update')
   }
 
   /***************************************
@@ -1892,11 +1954,15 @@ function identity (config = {}) {
     vault_get: vault.vault_get,
     vault_del: vault.vault_del,
     get_current_relay,
+    // App lifecycle
+    get_app_status: vault.get_app_status,
+    cancel_app_pairing: vault.cancel_app_pairing,
     // Writer access management
     start_writer_watcher: vault.start_writer_watcher,
     request_writer_access: vault.request_writer_access,
     wait_for_writer_access: vault.wait_for_writer_access,
     log_bootstrap_device: vault.log_bootstrap_device,
+    ping_liveness: vault.ping_liveness,
     // Complete authentication (called by websys-ui after app join flow)
     complete_authentication,
     // Setters
@@ -1968,6 +2034,7 @@ INTERNAL FUNCTIONS
           username: result.username || username,
           mode
         }
+        vault.ping_liveness()
         state.emitter.emit('vault_ready', state.pending_auth)
         return
       }
@@ -1984,6 +2051,7 @@ INTERNAL FUNCTIONS
       swarm.on('connection', (socket) => store_device_noise_key(b4a.toString(socket.remotePublicKey, 'hex')))
       state.store = store
       state.swarm = swarm
+      vault.ping_liveness()
       if (auth_data.defer_resolve) {
         state.pending_auth = { username, mode }
         state.emitter.emit('vault_ready', state.pending_auth)

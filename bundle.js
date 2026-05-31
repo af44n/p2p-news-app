@@ -392,6 +392,7 @@ DATA STRUCTURES, The only place we need to define structures..
     get_avatar_content: content.get_avatar_content,
     upload_avatar: content.upload_avatar,
     create_default_profile: content.create_default_profile,
+    get_app_status: identity.get_app_status,
     get_raw_data,
     // Getters
     get_local_key,
@@ -530,8 +531,9 @@ INTERNAL FUNCTIONS
       if (metadata.writable) {
         identity.start_writer_watcher()
       } else {
-        await identity.request_writer_access()
-        await identity.wait_for_writer_access()
+        const status = await identity.get_app_status()
+        if (status !== 'pairing') await identity.request_writer_access()
+        identity.wait_for_writer_access().then(s => s && state.emitter.emit('update')).catch(e => console.warn('Watcher ended:', e.message))
       }
     } else {
       // First-time seed user — create structures
@@ -784,6 +786,11 @@ async function render_view (view, ...args) {
   const view_el = document.querySelector('.view')
   if (state.is_joining) {
     view_el.innerHTML = '<p>Joining, please wait...</p>'
+    return
+  }
+  const status = await state.api.get_app_status()
+  if (status === 'pairing') {
+    view_el.innerHTML = '<p>Pairing... waiting for creator device to come online and approve your access.</p>'
     return
   }
   if (!state.is_ready && view !== 'explore') return
