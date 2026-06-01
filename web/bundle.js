@@ -3140,6 +3140,113 @@ function fallback_module () {
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
+
+const { get } = statedb(fallback_module)
+const net_helper = require('net_helper')
+
+module.exports = blog_cards
+
+async function blog_cards (opts, invite) {
+  const { sid } = opts
+  const { id } = await get(sid)
+
+  const { io, _ } = net_helper(id)
+  io.on.card_list = io_card_list()
+  if (invite) io.accept(invite)
+
+  const el = document.createElement('div')
+  let current_path = ''
+
+  el.addEventListener('click', handle_card_click)
+
+  return el
+
+  function io_card_list () {
+    const on = { provision: on_provision }
+    return handler
+    function handler (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_provision (m) { render(m.data) }
+  }
+
+  function handle_card_click () {
+    if (current_path) {
+      _.card_list('card_clicked', {}, { path: current_path })
+    }
+  }
+
+  function render (card_data) {
+    const data = card_data.data || {}
+    current_path = card_data.path || ''
+
+    render_blog_card(data)
+  }
+
+  function render_blog_card (data) {
+    const author = data.author || 'Anonymous'
+    const read_time = estimate_read_time(data.content || data.description || '')
+    const date_formatted = format_blog_date(data.date || '')
+    const has_image = data.image && data.image.length > 0
+    const image_html = has_image
+      ? `<div class="blog-hero"><img class="blog-hero-img" src="${data.image}" alt="" /></div>`
+      : ''
+
+    el.innerHTML = `
+      <div class="blog-card blog-mode">
+        <div class="blog-accent"></div>
+        ${image_html}
+        <div class="blog-body">
+          <div class="blog-date-line">
+            <span class="blog-date">${date_formatted}</span>
+          </div>
+          <h3 class="blog-title">${data.title || 'Untitled'}</h3>
+          <p class="blog-excerpt">${data.description || ''}</p>
+          <div class="blog-footer">
+            <div class="blog-author-line">
+              <div class="blog-author-avatar">${author[0] || 'A'}</div>
+              <span class="blog-author-name">${author}</span>
+            </div>
+            <span class="blog-read-time">${read_time} min read</span>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  function estimate_read_time (text) {
+    return Math.max(1, Math.ceil((text.split(/\\s+/).length) / 200))
+  }
+
+  function format_blog_date (date_str) {
+    if (!date_str) return ''
+    const d = new Date(date_str)
+    if (isNaN(d)) return date_str
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+}
+
+function fallback_module () {
+  const _ = {
+    net_helper: { $: '' }
+  }
+
+  return { _, api: fallback_instance }
+
+  function fallback_instance () {
+    const drive = {
+      'runtime/': {
+        'card-0.json': { raw: '{}' }
+      }
+    }
+    return { drive }
+  }
+}
+
+}).call(this)}).call(this,"/web/node_modules/blog_cards/index.js")
+},{"STATE":1,"net_helper":5}],4:[function(require,module,exports){
+(function (__filename){(function (){
+const STATE = require('STATE')
+const statedb = STATE(__filename)
 const { get } = statedb(fallback_module)
 
 const graph_explorer = require('graph-explorer')
@@ -3326,7 +3433,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/menu_sidebar/index.js")
-},{"STATE":1,"graph-explorer":2}],4:[function(require,module,exports){
+},{"STATE":1,"graph-explorer":2}],5:[function(require,module,exports){
 (function (__filename){(function (){
 module.exports = net
 
@@ -3369,6 +3476,7 @@ function net (id) {
     }
   }
   function add (name, tx, to, rx, $) {
+    if (_[name]) throw new Error(`${label} petname "${name}" is already in use`)
     const { state } = $[to] = { rx, tx, state: { name, to, mid: 0 } }
     _[name] = send
     function send (type, refs, data) {
@@ -3383,7 +3491,7 @@ function net (id) {
 }
 
 }).call(this)}).call(this,"/web/node_modules/net_helper/index.js")
-},{}],5:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 module.exports = graphdb
 
 function graphdb (entries) {
@@ -3434,7 +3542,7 @@ function graphdb (entries) {
   }
 }
 
-},{}],6:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3692,8 +3800,8 @@ async function news_app (opts, protocol) {
     if (node_type !== 'discover') {
       tabs_html = `
         <div class="view-tabs">
-          <button class="tab ${active_tab === 'news' ? 'active' : ''}">News</button>
-          <button class="tab ${active_tab === 'blog' ? 'active' : ''}">Blog</button>
+          <button class="tab tab-news ${active_tab === 'news' ? 'active' : ''}">News</button>
+          <button class="tab tab-blog ${active_tab === 'blog' ? 'active' : ''}">Blog</button>
         </div>
       `
     }
@@ -3736,7 +3844,7 @@ async function news_app (opts, protocol) {
     }
 
     if (fetched_items.length > 0) {
-      render_feed_view({ items: fetched_items, folder_name: node.name, target: target })
+      render_feed_view({ items: fetched_items, folder_name: node.name, target: target, is_news_feed: true })
     } else {
       target.innerHTML = '<div class="empty-container"><p>No news to show from subscriptions.</p></div>'
     }
@@ -3758,7 +3866,7 @@ async function news_app (opts, protocol) {
     }
 
     if (fetched_items.length > 0 || node_type === 'my-blog') {
-      render_feed_view({ items: fetched_items, folder_name: node.name, target: target })
+      render_feed_view({ items: fetched_items, folder_name: node.name, target: target, is_news_feed: false })
       if (node_type === 'my-blog') {
         target.insertAdjacentHTML('beforeend', '<div class="news-fab">+</div>')
       }
@@ -3767,9 +3875,9 @@ async function news_app (opts, protocol) {
     }
   }
 
-  function render_feed_view ({ items, folder_name, target }) {
+  function render_feed_view ({ items, folder_name, target, is_news_feed }) {
     target.appendChild(newsfeed_el)
-    _.newsfeed('render_feed', {}, { items: items, folder_name: folder_name, is_news_feed: true })
+    _.newsfeed('render_feed', {}, { items: items, folder_name: folder_name, is_news_feed: is_news_feed })
   }
 
   async function render_article_view (post_path) {
@@ -3778,8 +3886,7 @@ async function news_app (opts, protocol) {
       main_viewer.innerHTML = '<div class="empty-container"><p>Content not available.</p></div>'
       return
     }
-    main_viewer.innerHTML = ''
-    main_viewer.appendChild(newsfeed_el)
+    main_viewer.replaceChildren(newsfeed_el)
     _.newsfeed('render_article', {}, {
       data: {
         title: post_data.title,
@@ -3794,15 +3901,20 @@ async function news_app (opts, protocol) {
     const node = db ? db.get(path) : null
     const blog_name = node ? node.name : 'Main Blog'
     _.write('provision', {}, { selected_blog: blog_name })
-    main_viewer.innerHTML = ''
-    main_viewer.appendChild(write_el)
+    main_viewer.replaceChildren(write_el)
   }
 
-  function map_local_story (s) {
-    return { path: `local-${Math.random()}`, data: s }
+  function map_local_story (s, i) {
+    return { path: `local-${i}`, data: s }
   }
 
   async function fetch_post_data (post_path) {
+    if (post_path.startsWith('local-')) {
+      const idx = parseInt(post_path.slice(6), 10)
+      const stories = get_local_stories()
+      return stories[idx] || null
+    }
+
     try {
       const file = await drive.get(post_path)
       if (file && file.raw) {
@@ -3965,7 +4077,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news/index.js")
-},{"./graphdb":5,"STATE":1,"menu_sidebar":3,"net_helper":4,"newsfeed_view":10,"newsfeed_view/content_parser":9,"write_page":11}],7:[function(require,module,exports){
+},{"./graphdb":6,"STATE":1,"menu_sidebar":4,"net_helper":5,"newsfeed_view":11,"newsfeed_view/content_parser":10,"write_page":12}],8:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3992,8 +4104,8 @@ async function news_cards (opts, invite) {
 
   function io_card_list () {
     const on = { provision: on_provision }
-    return protocol
-    function protocol (m) { (on[m.type] || on_fail)(m) }
+    return handler
+    function handler (m) { (on[m.type] || on_fail)(m) }
     function on_fail () { }
     function on_provision (m) { render(m.data) }
   }
@@ -4007,24 +4119,27 @@ async function news_cards (opts, invite) {
   function render (card_data) {
     const data = card_data.data || {}
     current_path = card_data.path || ''
-    const date = data.date || ''
-    const title = data.title || 'Untitled Story'
+
+    render_news_card(data)
+  }
+
+  function render_news_card (data) {
     const author = data.author || 'Anonymous'
-    const description = data.description || ''
     const tags = Array.isArray(data.tags) ? data.tags : []
     const tags_html = tags.map(render_tag).join('')
 
     el.innerHTML = `
-      <div class="news-card">
+      <div class="news-card news-mode">
+        <div class="news-accent"></div>
         <div class="news-avatar">${author[0] || 'A'}</div>
         <div class="news-content">
           <div class="news-meta-top">
             <span class="news-author">${author}</span>
-            <span class="news-separator">•</span>
-            <span class="news-date-text">${date}</span>
+            <span class="news-separator">·</span>
+            <span class="news-date-text">${data.date || ''}</span>
           </div>
-          <h3 class="news-title">${title}</h3>
-          <p class="news-description">${description}</p>
+          <h3 class="news-title">${data.title || 'Untitled'}</h3>
+          <p class="news-description">${data.description || ''}</p>
           <div class="news-meta-bottom">
             <div class="news-tags">${tags_html}</div>
           </div>
@@ -4034,7 +4149,7 @@ async function news_cards (opts, invite) {
   }
 
   function render_tag (tag) {
-    return `<span class="news-tag-pill">${tag}</span>`
+    return `<span class="news-tag-pill">#${tag}</span>`
   }
 }
 
@@ -4056,13 +4171,14 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news_cards/index.js")
-},{"STATE":1,"net_helper":4}],8:[function(require,module,exports){
+},{"STATE":1,"net_helper":5}],9:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 
 const { get } = statedb(fallback_module)
 const news_cards = require('news_cards')
+const blog_cards = require('blog_cards')
 const net_helper = require('net_helper')
 
 module.exports = newsfeed_card_list
@@ -4072,31 +4188,43 @@ async function newsfeed_card_list (opts, invite) {
   const { id, sdb } = await get(sid)
 
   const { io, _ } = net_helper(id)
-  io.on.card_list = io_card_list()
   io.on.feed = io_feed()
   if (invite) io.accept(invite)
 
   const el = document.createElement('div')
   el.className = 'newsfeed-list'
 
-  const card_sends = []
-  const card_els = []
+  const news_sends = []
+  const news_els = []
+  const blog_sends = []
+  const blog_els = []
 
-  const subs = await sdb.watch(onbatch)
-  const card_subs = (subs || []).sort(sort_by_index)
+  const subs = await sdb.watch(handle_watch)
+  const news_subs = (subs || []).filter(filter_news).sort(sort_by_index)
+  const blog_subs = (subs || []).filter(filter_blog).sort(sort_by_index)
 
-  for (let i = 0; i < card_subs.length; i++) {
-    const card_el = await news_cards({ sid: card_subs[i].sid }, io.invite('card_list', { card_list: id }))
-    card_els.push(card_el)
-    card_sends[i] = _.card_list
+  for (let i = 0; i < news_subs.length; i++) {
+    const name = 'news_card_list_' + i
+    io.on[name] = io_card_list()
+    const card_el = await news_cards({ sid: news_subs[i].sid }, io.invite(name, { card_list: id }))
+    news_els.push(card_el)
+    news_sends[i] = _[name]
+  }
+
+  for (let i = 0; i < blog_subs.length; i++) {
+    const name = 'blog_card_list_' + i
+    io.on[name] = io_card_list()
+    const card_el = await blog_cards({ sid: blog_subs[i].sid }, io.invite(name, { card_list: id }))
+    blog_els.push(card_el)
+    blog_sends[i] = _[name]
   }
 
   return el
 
   function io_feed () {
     const on = { provision: on_provision }
-    return protocol
-    function protocol (m) { (on[m.type] || on_fail)(m) }
+    return handler
+    function handler (m) { (on[m.type] || on_fail)(m) }
     function on_fail () { }
     function on_provision (m) { update_cards(m.data) }
   }
@@ -4113,27 +4241,45 @@ async function newsfeed_card_list (opts, invite) {
 
   function update_cards (payload) {
     const items = payload.items || []
+    const is_news_feed = payload.is_news_feed !== false
 
-    el.innerHTML = ''
+    const active_cards = []
+    const target_sends = is_news_feed ? news_sends : blog_sends
+    const target_els = is_news_feed ? news_els : blog_els
 
-    for (let i = 0; i < items.length && i < card_els.length; i++) {
-      if (card_sends[i]) {
-        card_sends[i]('provision', {}, { data: items[i].data, path: items[i].path })
+    for (let i = 0; i < items.length && i < target_els.length; i++) {
+      if (target_sends[i]) {
+        target_sends[i]('provision', {}, { data: items[i].data, path: items[i].path })
       }
-      el.appendChild(card_els[i])
+      active_cards.push(target_els[i])
     }
+
+    el.replaceChildren(...active_cards)
   }
 
   function sort_by_index (a, b) {
-    return a.sid[a.sid.length - 1] - b.sid[b.sid.length - 1]
+    const a_str = a.sid[a.sid.length - 1] || ''
+    const b_str = b.sid[b.sid.length - 1] || ''
+    const a_idx = parseInt(a_str.split(':').pop(), 10) || 0
+    const b_idx = parseInt(b_str.split(':').pop(), 10) || 0
+    return a_idx - b_idx
   }
 
-  function onbatch () {}
+  function filter_news (s) {
+    return (s.sid || []).join('>').includes('news_cards')
+  }
+
+  function filter_blog (s) {
+    return (s.sid || []).join('>').includes('blog_cards')
+  }
+
+  function handle_watch () {}
 }
 
 function fallback_module () {
   const _ = {
     news_cards: { $: '' },
+    blog_cards: { $: '' },
     net_helper: { $: '' }
   }
 
@@ -4143,11 +4289,15 @@ function fallback_module () {
     const _ = {
       news_cards: {
         mapping: { runtime: 'runtime', theme: 'theme' }
+      },
+      blog_cards: {
+        mapping: { runtime: 'runtime', theme: 'theme' }
       }
     }
 
     for (let i = 0; i < 30; i++) {
       _.news_cards[i] = ''
+      _.blog_cards[i] = ''
     }
 
     const drive = {
@@ -4161,7 +4311,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/newsfeed_card_list/index.js")
-},{"STATE":1,"net_helper":4,"news_cards":7}],9:[function(require,module,exports){
+},{"STATE":1,"blog_cards":3,"net_helper":5,"news_cards":8}],10:[function(require,module,exports){
 const STATE = require('STATE')
 
 module.exports = content_parser
@@ -4183,7 +4333,7 @@ async function content_parser (opts, protocol) {
 
     if (in_frontmatter) {
       const { key, value } = parse_metadata_line(line)
-      if (key) metadata[key] = value
+      if (key) metadata[key] = parse_value(key, value)
     } else {
       content += line + '\n'
     }
@@ -4201,9 +4351,31 @@ async function content_parser (opts, protocol) {
     const value = parts.slice(1).join(':').trim()
     return { key, value }
   }
+
+  function parse_value (key, value) {
+    if (key === 'tags') return parse_tags(value)
+    return value
+  }
+
+  function parse_tags (value) {
+    const match = value.match(/\[([^\]]*)\]/)
+    if (!match) return []
+    return match[1]
+      .split(',')
+      .map(strip_tag)
+      .filter(filter_empty)
+  }
+
+  function strip_tag (t) {
+    return t.trim().replace(/^["']|["']$/g, '').replace(/^#/, '')
+  }
+
+  function filter_empty (t) {
+    return t.length > 0
+  }
 }
 
-},{"STATE":1}],10:[function(require,module,exports){
+},{"STATE":1}],11:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4258,13 +4430,13 @@ async function newsfeed_view (opts, invite) {
   }
 
   function show_feed (data) {
-    element.innerHTML = ''
-    if (list_el) element.appendChild(list_el)
+    if (list_el) element.replaceChildren(list_el)
+    else element.replaceChildren()
     _.list('provision', {}, data)
   }
 
   function show_article (payload) {
-    element.innerHTML = ''
+    element.replaceChildren()
     const data = payload.data || payload
     const content_html = (data.content || '')
       .split('\n\n')
@@ -4273,7 +4445,7 @@ async function newsfeed_view (opts, invite) {
 
     element.innerHTML = `
       <article class="news-container">
-        <button class="back-btn">← Back to feed</button>
+        <button class="back-btn"><span class="back-icon">←</span> Back to feed</button>
         <header class="news-header">
           <div>
             <h2 class="news-title article-title-main">${data.title || 'Untitled'}</h2>
@@ -4348,7 +4520,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/newsfeed_view/index.js")
-},{"STATE":1,"net_helper":4,"newsfeed_card_list":8}],11:[function(require,module,exports){
+},{"STATE":1,"net_helper":5,"newsfeed_card_list":9}],12:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4448,7 +4620,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/write_page/index.js")
-},{"STATE":1,"net_helper":4}],12:[function(require,module,exports){
+},{"STATE":1,"net_helper":5}],13:[function(require,module,exports){
 (function (__filename){(function (){
 localStorage.clear()
 const STATE = require('STATE')
@@ -4480,7 +4652,7 @@ async function init () {
   const { sid } = start[0]
 
   const app = await news({ sid, vault: custom_vault })
-  document.body.innerHTML = ''
+  document.body.replaceChildren()
   document.body.append(app)
 }
 
@@ -4535,4 +4707,4 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/page.js")
-},{"STATE":1,"news":6}]},{},[12]);
+},{"STATE":1,"news":7}]},{},[13]);
