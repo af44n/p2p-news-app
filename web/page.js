@@ -59,7 +59,8 @@ function fallback_module () {
           undo: 'undo',
           posts: 'posts',
           data: 'data',
-          news_cards: 'news_cards'
+          news_cards: 'news_cards',
+          blog_cards: 'blog_cards'
         }
       }
     },
@@ -77,7 +78,8 @@ function fallback_module () {
       'undo/': {},
       'posts/': {},
       'data/': {},
-      'news_cards/': {}
+      'news_cards/': {},
+      'blog_cards/': {}
     }
   }
 }
