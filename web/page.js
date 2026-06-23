@@ -32,7 +32,7 @@ async function init () {
   document.body.append(app)
 }
 
-init().catch(function handle_init_error () { })
+init().catch(function handle_init_error (err) { console.error('[INIT ERROR]', err) })
 
 function fallback_module () {
   return {
