@@ -41,10 +41,10 @@ function fallback_module () {
         $: '',
         0: {
           _: {
-            newsfeed_view: { $: '' },
+            feed_view: { $: '' },
             write_page: { $: '' },
             './graphdb': { $: '' },
-            'newsfeed_view/content_parser': { $: '' },
+            'feed_view/content_parser': { $: '' },
             net_helper: { $: '' }
           }
         },

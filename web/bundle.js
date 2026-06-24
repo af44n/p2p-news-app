@@ -3300,7 +3300,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/blog_card_list/index.js")
-},{"STATE":1,"blog_cards":5,"net_helper":7}],5:[function(require,module,exports){
+},{"STATE":1,"blog_cards":5,"net_helper":9}],5:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3402,7 +3402,243 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/blog_cards/index.js")
-},{"STATE":1,"net_helper":7}],6:[function(require,module,exports){
+},{"STATE":1,"net_helper":9}],6:[function(require,module,exports){
+const STATE = require('STATE')
+
+module.exports = content_parser
+
+async function content_parser (opts, protocol) {
+  const { raw } = opts
+  if (!raw) return null
+
+  const lines = raw.split('\n')
+  const metadata = {}
+  let content = ''
+  let in_frontmatter = false
+
+  for (const line of lines) {
+    if (line.trim() === '---') {
+      in_frontmatter = !in_frontmatter
+      continue
+    }
+
+    if (in_frontmatter) {
+      const { key, value } = parse_metadata_line(line)
+      if (key) metadata[key] = parse_value(key, value)
+    } else {
+      content += line + '\n'
+    }
+  }
+
+  return {
+    ...metadata,
+    content: content.trim()
+  }
+
+  function parse_metadata_line (line) {
+    const parts = line.split(':')
+    if (parts.length < 2) return {}
+    const key = parts[0].trim()
+    const value = parts.slice(1).join(':').trim()
+    return { key, value }
+  }
+
+  function parse_value (key, value) {
+    if (key === 'tags') return parse_tags(value)
+    return value
+  }
+
+  function parse_tags (value) {
+    const match = value.match(/\[([^\]]*)\]/)
+    if (!match) return []
+    return match[1]
+      .split(',')
+      .map(strip_tag)
+      .filter(filter_empty)
+  }
+
+  function strip_tag (t) {
+    return t.trim().replace(/^["']|["']$/g, '').replace(/^#/, '')
+  }
+
+  function filter_empty (t) {
+    return t.length > 0
+  }
+}
+
+},{"STATE":1}],7:[function(require,module,exports){
+(function (__filename){(function (){
+const STATE = require('STATE')
+const statedb = STATE(__filename)
+
+const { get } = statedb(fallback_module)
+const news_list = require('newsfeed_card_list')
+const blog_list = require('blog_card_list')
+const net_helper = require('net_helper')
+
+module.exports = feed_view
+
+async function feed_view (opts, invite) {
+  const { sid } = opts
+  const { id, sdb } = await get(sid)
+
+  const { io, _ } = net_helper(id)
+  io.on.news = io_news()
+  io.on.news_list = io_news_list()
+  io.on.blog_list = io_blog_list()
+  if (invite) io.accept(invite)
+
+  const element = document.createElement('div')
+
+  let news_list_el = null
+  let blog_list_el = null
+
+  const subs = await sdb.watch(handle_watch)
+
+  if (subs && subs.length > 0) {
+    news_list_el = await news_list({ sid: subs[0].sid }, io.invite('news_list', { feed: id }))
+  }
+  if (subs && subs.length > 1) {
+    blog_list_el = await blog_list({ sid: subs[1].sid }, io.invite('blog_list', { feed: id }))
+  }
+
+  element.addEventListener('click', handle_element_click)
+
+  return element
+
+  function io_news () {
+    const on = { render_feed: on_render_feed, render_blog_feed: on_render_blog_feed, render_article: on_render_article }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_render_feed (m) { show_news_feed(m.data) }
+    function on_render_blog_feed (m) { show_blog_feed(m.data) }
+    function on_render_article (m) { show_article(m.data) }
+  }
+
+  function io_news_list () {
+    const on = { card_clicked: on_card_clicked }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_card_clicked (m) {
+      _.news('select_node', {}, { instance_path: m.data.path })
+    }
+  }
+
+  function io_blog_list () {
+    const on = { card_clicked: on_blog_card_clicked }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_blog_card_clicked (m) {
+      _.news('select_node', {}, { instance_path: m.data.path })
+    }
+  }
+
+  function show_news_feed (data) {
+    if (news_list_el) element.replaceChildren(news_list_el)
+    else element.replaceChildren()
+    _.news_list('provision', {}, data)
+  }
+
+  function show_blog_feed (data) {
+    if (blog_list_el) element.replaceChildren(blog_list_el)
+    else element.replaceChildren()
+    _.blog_list('provision', {}, data)
+  }
+
+  function show_article (payload) {
+    element.replaceChildren()
+    const data = payload.data || payload
+    const content_html = (data.content || '')
+      .split('\n\n')
+      .map(parse_block)
+      .join('')
+
+    element.innerHTML = `
+      <article class="news-container">
+        <button class="back-btn"><span class="back-icon">←</span> Back to feed</button>
+        <header class="news-header">
+          <div>
+            <h2 class="news-title article-title-main">${data.title || 'Untitled'}</h2>
+            <div class="news-subheader">
+              <span>By <strong>${data.author || 'Anonymous'}</strong></span> • <span>${data.date || 'Unknown Date'}</span>
+            </div>
+          </div>
+        </header>
+        <div class="article-body">${content_html}</div>
+      </article>
+    `
+  }
+
+  function handle_element_click (e) {
+    if (e.target.closest('.back-btn')) {
+      handle_back_click()
+    }
+  }
+
+  function handle_back_click () {
+    _.news('navigate_back')
+  }
+
+  function handle_watch () {}
+
+  function parse_block (block) {
+    block = block.trim()
+    if (!block) return ''
+    if (block.startsWith('# ')) return `<h1>${block.slice(2)}</h1>`
+    if (block.startsWith('## ')) return `<h2>${block.slice(3)}</h2>`
+    if (block.startsWith('### ')) return `<h3>${block.slice(4)}</h3>`
+    if (block.startsWith('- ')) {
+      const items = block.split('\n').map(format_list_item).join('')
+      return `<ul>${items}</ul>`
+    }
+    let p = block
+    p = p.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    p = p.replace(/\*(.*?)\*/g, '<em>$1</em>')
+    p = p.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>')
+    return `<p>${p}</p>`
+  }
+
+  function format_list_item (line) {
+    return `<li>${line.replace(/^- /, '')}</li>`
+  }
+}
+
+function fallback_module () {
+  const _ = {
+    newsfeed_card_list: { $: '' },
+    blog_card_list: { $: '' },
+    net_helper: { $: '' }
+  }
+
+  return { _, api: fallback_instance }
+
+  function fallback_instance () {
+    const _ = {
+      newsfeed_card_list: {
+        0: '',
+        mapping: { runtime: 'runtime', theme: 'theme' }
+      },
+      blog_card_list: {
+        0: '',
+        mapping: { runtime: 'runtime', theme: 'theme' }
+      }
+    }
+
+    const drive = {
+      'runtime/': {
+        'viewer_data.json': { raw: '{}' }
+      }
+    }
+
+    return { _, drive }
+  }
+}
+
+}).call(this)}).call(this,"/web/node_modules/feed_view/index.js")
+},{"STATE":1,"blog_card_list":4,"net_helper":9,"newsfeed_card_list":13}],8:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3532,29 +3768,29 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/menu_sidebar/index.js")
-},{"STATE":1,"graph-explorer":2,"net_helper":7}],7:[function(require,module,exports){
+},{"STATE":1,"graph-explorer":2,"net_helper":9}],9:[function(require,module,exports){
 (function (__filename){(function (){
 module.exports = net
 
-function net (id) {
+function net(id) {
   const [label, _, sub, hub] = [`[${id}@${__filename}]`, {}, {}, {}]
   const io = { invite, accept, on: {} }
   return { io, _ }
-  function forward (to, M) {
+  function forward(to, M) {
     for (const id of Object.keys(sub)) if (to.startsWith(id)) return sub[id].tx(M)
     for (const id of Object.keys(hub)) if (to.startsWith(id)) hub[id].tx(M)
     console.error(`[id] ${label} - cant forward to unknown recipient "${to}"`)
   }
-  function invite (name, ids) {
+  function invite(name, ids) {
     if (!io.on[name]) throw new Error(`${label} no protocol handler for "${name}"`)
     return Object.assign(invite, { ids })
-    function invite (tx) {
+    function invite(tx) {
       const rx = router(sub)
       add(name, tx, tx.id, rx, sub)
       return rx
     }
   }
-  function accept (invite) {
+  function accept(invite) {
     const rx = router(hub)
     const tx = invite(Object.assign(rx, { id }))
     for (const [name, to] of Object.entries(invite.ids)) {
@@ -3563,8 +3799,8 @@ function net (id) {
       add(name, tx, to, rx, hub)
     }
   }
-  function router ($) {
-    return function rx (M) {
+  function router($) {
+    return function rx(M) {
       const { head: [by, to, mid] } = M
       console.log(`[by] ${by}\n[to] ${to}\n[id]`, M)
       if (to !== id) return forward(to, M)
@@ -3574,13 +3810,12 @@ function net (id) {
       io.on[name](M)
     }
   }
-  function add (name, tx, to, rx, $) {
+  function add(name, tx, to, rx, $) {
     if (_[name]) throw new Error(`${label} petname "${name}" is already in use`)
-    const { state } = $[to] = { rx, tx, state: { name, to, mid: 0 } }
+    const state = { name, to, mid: 0 }
     _[name] = send
-    function send (type, refs, data) {
-      if (refs === undefined) refs = {}
-      if (data === undefined) data = null
+    $[to] = { rx, tx, state }
+    function send(type, refs = {}, data = null) {
       const head = [id, to, state.mid++]
       const meta = { time: Date.now(), stack: (new Error().stack) }
       tx({ head, refs, type, data, meta })
@@ -3590,7 +3825,7 @@ function net (id) {
 }
 
 }).call(this)}).call(this,"/web/node_modules/net_helper/index.js")
-},{}],8:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 module.exports = graphdb
 
 function graphdb (entries) {
@@ -3641,16 +3876,16 @@ function graphdb (entries) {
   }
 }
 
-},{}],9:[function(require,module,exports){
+},{}],11:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 
 const { get } = statedb(fallback_module)
 const menu_sidebar = require('menu_sidebar')
-const newsfeed_view = require('newsfeed_view')
+const feed_view = require('feed_view')
 const write_page = require('write_page')
-const content_parser = require('newsfeed_view/content_parser')
+const content_parser = require('feed_view/content_parser')
 const graphdb = require('./graphdb')
 const net_helper = require('net_helper')
 
@@ -3663,7 +3898,6 @@ async function news_app (opts, protocol) {
 
   const by = id
   let db = null
-  let msg_id = 0
   let sidebar_connected = false
   let latest_entries = null
 
@@ -3721,7 +3955,7 @@ async function news_app (opts, protocol) {
     Promise.resolve().then(sync_initial_state_to_sidebar)
   }
 
-  newsfeed_el = await newsfeed_view({ sid: subs[1].sid }, io.invite('newsfeed', { news: by }))
+  newsfeed_el = await feed_view({ sid: subs[1].sid }, io.invite('newsfeed', { news: by }))
   write_el = await write_page({ sid: subs[2].sid }, io.invite('write', { news: by }))
 
   render_main_view()
@@ -4086,10 +4320,10 @@ async function news_app (opts, protocol) {
 function fallback_module () {
   const _ = {
     menu_sidebar: { $: '' },
-    newsfeed_view: { $: '' },
+    feed_view: { $: '' },
     write_page: { $: '' },
     './graphdb': { $: '' },
-    'newsfeed_view/content_parser': { $: '' },
+    'feed_view/content_parser': { $: '' },
     net_helper: { $: '' }
   }
 
@@ -4110,7 +4344,7 @@ function fallback_module () {
           data: 'data'
         }
       },
-      newsfeed_view: {
+      feed_view: {
         0: '',
         mapping: { runtime: 'runtime', theme: 'theme' }
       },
@@ -4119,7 +4353,7 @@ function fallback_module () {
         mapping: { runtime: 'runtime', theme: 'theme' }
       },
       './graphdb': { 0: '' },
-      'newsfeed_view/content_parser': { 0: '' }
+      'feed_view/content_parser': { 0: '' }
     }
 
     const drive = {
@@ -4200,7 +4434,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news/index.js")
-},{"./graphdb":8,"STATE":1,"menu_sidebar":6,"net_helper":7,"newsfeed_view":13,"newsfeed_view/content_parser":12,"write_page":14}],10:[function(require,module,exports){
+},{"./graphdb":10,"STATE":1,"feed_view":7,"feed_view/content_parser":6,"menu_sidebar":8,"net_helper":9,"write_page":14}],12:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4289,7 +4523,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news_cards/index.js")
-},{"STATE":1,"net_helper":7}],11:[function(require,module,exports){
+},{"STATE":1,"net_helper":9}],13:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4396,243 +4630,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/newsfeed_card_list/index.js")
-},{"STATE":1,"net_helper":7,"news_cards":10}],12:[function(require,module,exports){
-const STATE = require('STATE')
-
-module.exports = content_parser
-
-async function content_parser (opts, protocol) {
-  const { raw } = opts
-  if (!raw) return null
-
-  const lines = raw.split('\n')
-  const metadata = {}
-  let content = ''
-  let in_frontmatter = false
-
-  for (const line of lines) {
-    if (line.trim() === '---') {
-      in_frontmatter = !in_frontmatter
-      continue
-    }
-
-    if (in_frontmatter) {
-      const { key, value } = parse_metadata_line(line)
-      if (key) metadata[key] = parse_value(key, value)
-    } else {
-      content += line + '\n'
-    }
-  }
-
-  return {
-    ...metadata,
-    content: content.trim()
-  }
-
-  function parse_metadata_line (line) {
-    const parts = line.split(':')
-    if (parts.length < 2) return {}
-    const key = parts[0].trim()
-    const value = parts.slice(1).join(':').trim()
-    return { key, value }
-  }
-
-  function parse_value (key, value) {
-    if (key === 'tags') return parse_tags(value)
-    return value
-  }
-
-  function parse_tags (value) {
-    const match = value.match(/\[([^\]]*)\]/)
-    if (!match) return []
-    return match[1]
-      .split(',')
-      .map(strip_tag)
-      .filter(filter_empty)
-  }
-
-  function strip_tag (t) {
-    return t.trim().replace(/^["']|["']$/g, '').replace(/^#/, '')
-  }
-
-  function filter_empty (t) {
-    return t.length > 0
-  }
-}
-
-},{"STATE":1}],13:[function(require,module,exports){
-(function (__filename){(function (){
-const STATE = require('STATE')
-const statedb = STATE(__filename)
-
-const { get } = statedb(fallback_module)
-const news_list = require('newsfeed_card_list')
-const blog_list = require('blog_card_list')
-const net_helper = require('net_helper')
-
-module.exports = newsfeed_view
-
-async function newsfeed_view (opts, invite) {
-  const { sid } = opts
-  const { id, sdb } = await get(sid)
-
-  const { io, _ } = net_helper(id)
-  io.on.news = io_news()
-  io.on.news_list = io_news_list()
-  io.on.blog_list = io_blog_list()
-  if (invite) io.accept(invite)
-
-  const element = document.createElement('div')
-
-  let news_list_el = null
-  let blog_list_el = null
-
-  const subs = await sdb.watch(handle_watch)
-
-  if (subs && subs.length > 0) {
-    news_list_el = await news_list({ sid: subs[0].sid }, io.invite('news_list', { feed: id }))
-  }
-  if (subs && subs.length > 1) {
-    blog_list_el = await blog_list({ sid: subs[1].sid }, io.invite('blog_list', { feed: id }))
-  }
-
-  element.addEventListener('click', handle_element_click)
-
-  return element
-
-  function io_news () {
-    const on = { render_feed: on_render_feed, render_blog_feed: on_render_blog_feed, render_article: on_render_article }
-    return protocol
-    function protocol (m) { (on[m.type] || on_fail)(m) }
-    function on_fail () { }
-    function on_render_feed (m) { show_news_feed(m.data) }
-    function on_render_blog_feed (m) { show_blog_feed(m.data) }
-    function on_render_article (m) { show_article(m.data) }
-  }
-
-  function io_news_list () {
-    const on = { card_clicked: on_card_clicked }
-    return protocol
-    function protocol (m) { (on[m.type] || on_fail)(m) }
-    function on_fail () { }
-    function on_card_clicked (m) {
-      _.news('select_node', {}, { instance_path: m.data.path })
-    }
-  }
-
-  function io_blog_list () {
-    const on = { card_clicked: on_blog_card_clicked }
-    return protocol
-    function protocol (m) { (on[m.type] || on_fail)(m) }
-    function on_fail () { }
-    function on_blog_card_clicked (m) {
-      _.news('select_node', {}, { instance_path: m.data.path })
-    }
-  }
-
-  function show_news_feed (data) {
-    if (news_list_el) element.replaceChildren(news_list_el)
-    else element.replaceChildren()
-    _.news_list('provision', {}, data)
-  }
-
-  function show_blog_feed (data) {
-    if (blog_list_el) element.replaceChildren(blog_list_el)
-    else element.replaceChildren()
-    _.blog_list('provision', {}, data)
-  }
-
-  function show_article (payload) {
-    element.replaceChildren()
-    const data = payload.data || payload
-    const content_html = (data.content || '')
-      .split('\n\n')
-      .map(parse_block)
-      .join('')
-
-    element.innerHTML = `
-      <article class="news-container">
-        <button class="back-btn"><span class="back-icon">←</span> Back to feed</button>
-        <header class="news-header">
-          <div>
-            <h2 class="news-title article-title-main">${data.title || 'Untitled'}</h2>
-            <div class="news-subheader">
-              <span>By <strong>${data.author || 'Anonymous'}</strong></span> • <span>${data.date || 'Unknown Date'}</span>
-            </div>
-          </div>
-        </header>
-        <div class="article-body">${content_html}</div>
-      </article>
-    `
-  }
-
-  function handle_element_click (e) {
-    if (e.target.closest('.back-btn')) {
-      handle_back_click()
-    }
-  }
-
-  function handle_back_click () {
-    _.news('navigate_back')
-  }
-
-  function handle_watch () {}
-
-  function parse_block (block) {
-    block = block.trim()
-    if (!block) return ''
-    if (block.startsWith('# ')) return `<h1>${block.slice(2)}</h1>`
-    if (block.startsWith('## ')) return `<h2>${block.slice(3)}</h2>`
-    if (block.startsWith('### ')) return `<h3>${block.slice(4)}</h3>`
-    if (block.startsWith('- ')) {
-      const items = block.split('\n').map(format_list_item).join('')
-      return `<ul>${items}</ul>`
-    }
-    let p = block
-    p = p.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    p = p.replace(/\*(.*?)\*/g, '<em>$1</em>')
-    p = p.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>')
-    return `<p>${p}</p>`
-  }
-
-  function format_list_item (line) {
-    return `<li>${line.replace(/^- /, '')}</li>`
-  }
-}
-
-function fallback_module () {
-  const _ = {
-    newsfeed_card_list: { $: '' },
-    blog_card_list: { $: '' },
-    net_helper: { $: '' }
-  }
-
-  return { _, api: fallback_instance }
-
-  function fallback_instance () {
-    const _ = {
-      newsfeed_card_list: {
-        0: '',
-        mapping: { runtime: 'runtime', theme: 'theme' }
-      },
-      blog_card_list: {
-        0: '',
-        mapping: { runtime: 'runtime', theme: 'theme' }
-      }
-    }
-
-    const drive = {
-      'runtime/': {
-        'viewer_data.json': { raw: '{}' }
-      }
-    }
-
-    return { _, drive }
-  }
-}
-
-}).call(this)}).call(this,"/web/node_modules/newsfeed_view/index.js")
-},{"STATE":1,"blog_card_list":4,"net_helper":7,"newsfeed_card_list":11}],14:[function(require,module,exports){
+},{"STATE":1,"net_helper":9,"news_cards":12}],14:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4732,7 +4730,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/write_page/index.js")
-},{"STATE":1,"net_helper":7}],15:[function(require,module,exports){
+},{"STATE":1,"net_helper":9}],15:[function(require,module,exports){
 (function (__filename){(function (){
 localStorage.clear()
 const STATE = require('STATE')
@@ -4777,10 +4775,10 @@ function fallback_module () {
         $: '',
         0: {
           _: {
-            newsfeed_view: { $: '' },
+            feed_view: { $: '' },
             write_page: { $: '' },
             './graphdb': { $: '' },
-            'newsfeed_view/content_parser': { $: '' },
+            'feed_view/content_parser': { $: '' },
             net_helper: { $: '' }
           }
         },
@@ -4821,4 +4819,4 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/page.js")
-},{"STATE":1,"news":9}]},{},[15]);
+},{"STATE":1,"news":11}]},{},[15]);
