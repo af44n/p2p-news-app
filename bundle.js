@@ -5588,7 +5588,9 @@ const uint56 = (exports.uint56 = {
   },
   decode(state) {
     if (state.end - state.start < 7) throw new Error('Out of bounds')
-    return uint24.decode(state) + 0x1000000 * uint32.decode(state)
+    return validateSafeUint(
+      uint24.decode(state) + 0x1000000 * uint32.decode(state)
+    )
   }
 })
 
@@ -5604,7 +5606,9 @@ const uint64 = (exports.uint64 = {
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    return uint32.decode(state) + 0x100000000 * uint32.decode(state)
+    return validateSafeUint(
+      uint32.decode(state) + 0x100000000 * uint32.decode(state)
+    )
   }
 })
 
@@ -5620,7 +5624,9 @@ exports.uint64be = {
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    return 0x100000000 * uint32be.decode(state) + uint32be.decode(state)
+    return validateSafeUint(
+      0x100000000 * uint32be.decode(state) + uint32be.decode(state)
+    )
   }
 }
 
@@ -6502,9 +6508,24 @@ function zigZagEncodeBigInt(n) {
   return n < 0n ? 2n * -n - 1n : n === 0n ? 0n : 2n * n
 }
 
+function validateSafeUint(n) {
+  if (n > Number.MAX_SAFE_INTEGER)
+    throw new Error(
+      'uint is greater than the maximum safe integer, use biguint/bigint'
+    )
+  return n
+}
+
 function validateUint(n) {
   if (n >= 0 === false /* Handles NaN as well */)
     throw new Error('uint must be positive')
+  // Beyond this, Number arithmetic loses precision and silently corrupts the
+  // encoding. The zig-zag int codecs route through here too, so this also
+  // guards int values whose doubled magnitude exceeds the safe range.
+  if (n > Number.MAX_SAFE_INTEGER)
+    throw new Error(
+      'integer is greater than the maximum safe integer, use biguint/bigint'
+    )
 }
 
 },{"./endian":14,"./lexint":16,"./raw":17,"b4a":5}],16:[function(require,module,exports){
