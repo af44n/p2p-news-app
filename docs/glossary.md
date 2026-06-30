@@ -11,6 +11,7 @@ This document explains the main terms and concepts used across the p2p architect
 
 * **Device (Real Device)**: A physical device or separate digital environment used by a user (like a laptop, phone, or even a completely different browser).
 * **Virtual Device**: A simulated device running inside a browser tab (usually using sandboxed iframes). It behaves like a real device cryptographically, with its own keys, and is useful for testing, simulating users, or running sandboxed desktop-like environments.
+* **Bare/CLI Peer**: A node running in a terminal using the Bare runtime (or Node.js). It integrates with the same core data layer, Vault system, and Datashell concepts, offering a terminal-based interface (`clisys-ui.js` and `cliapp-ui.js`) without a graphical browser environment.
 
 ## Apps & Data Contexts
 
