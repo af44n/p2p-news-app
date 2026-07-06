@@ -32,7 +32,7 @@ async function init () {
   document.body.append(app)
 }
 
-init().catch(function handle_init_error () { })
+init().catch(function handle_init_error (err) { console.error('[INIT ERROR]', err) })
 
 function fallback_module () {
   return {
@@ -41,10 +41,10 @@ function fallback_module () {
         $: '',
         0: {
           _: {
-            newsfeed_view: { $: '' },
+            feed_view: { $: '' },
             write_page: { $: '' },
             './graphdb': { $: '' },
-            'newsfeed_view/content_parser': { $: '' },
+            'feed_view/content_parser': { $: '' },
             net_helper: { $: '' }
           }
         },
@@ -59,7 +59,8 @@ function fallback_module () {
           undo: 'undo',
           posts: 'posts',
           data: 'data',
-          news_cards: 'news_cards'
+          news_cards: 'news_cards',
+          blog_cards: 'blog_cards'
         }
       }
     },
@@ -77,7 +78,8 @@ function fallback_module () {
       'undo/': {},
       'posts/': {},
       'data/': {},
-      'news_cards/': {}
+      'news_cards/': {},
+      'blog_cards/': {}
     }
   }
 }
