@@ -1,4 +1,3 @@
-localStorage.clear()
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 statedb.admin()
@@ -42,6 +41,7 @@ function fallback_module () {
         0: {
           _: {
             feed_view: { $: '' },
+            feed_filters: { $: '' },
             write_page: { $: '' },
             './graphdb': { $: '' },
             'feed_view/content_parser': { $: '' },
@@ -70,7 +70,8 @@ function fallback_module () {
       'theme/': {},
       'runtime/': {
         'viewer_data.json': { raw: '{}' },
-        'write_data.json': { raw: '{}' }
+        'write_data.json': { raw: '{}' },
+        'local_stories.json': { raw: '[]' }
       },
       'mode/': {},
       'flags/': {},
