@@ -3299,7 +3299,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/blog_card_list/index.js")
-},{"STATE":1,"blog_cards":5,"net_helper":9}],5:[function(require,module,exports){
+},{"STATE":1,"blog_cards":5,"net_helper":10}],5:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3401,7 +3401,327 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/blog_cards/index.js")
-},{"STATE":1,"net_helper":9}],6:[function(require,module,exports){
+},{"STATE":1,"net_helper":10}],6:[function(require,module,exports){
+(function (__filename){(function (){
+const STATE = require('STATE')
+const statedb = STATE(__filename)
+
+const { get } = statedb(fallback_module)
+const net_helper = require('net_helper')
+
+const html_entities = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}
+
+module.exports = feed_filters
+
+async function feed_filters (opts, invite) {
+  const { sid } = opts
+  const { id, sdb } = await get(sid)
+  const { drive } = sdb
+  const { io, _ } = net_helper(id)
+  const filter_state = {
+    active_tag: 'all',
+    filter_tags: [{ value: 'all', label: 'All' }],
+    items: [],
+    scroll_left: 0
+  }
+
+  io.on.feed_view = io_feed_view()
+  if (invite) io.accept(invite)
+
+  const el = document.createElement('div')
+  const shadow = el.attachShadow({ mode: 'closed' })
+  const sheet = new CSSStyleSheet()
+
+  shadow.adoptedStyleSheets = [sheet]
+  shadow.innerHTML = `
+    <div class="feed-filter-shell">
+      <button class="feed-filter-arrow feed-filter-arrow-left" type="button" aria-label="Scroll filters left">‹</button>
+      <nav class="feed-filters" aria-label="Feed filters"></nav>
+      <button class="feed-filter-arrow feed-filter-arrow-right" type="button" aria-label="Scroll filters right">›</button>
+    </div>
+  `
+
+  const shell_el = shadow.querySelector('.feed-filter-shell')
+  const filters_el = shadow.querySelector('.feed-filters')
+  const left_arrow_el = shadow.querySelector('.feed-filter-arrow-left')
+  const right_arrow_el = shadow.querySelector('.feed-filter-arrow-right')
+
+  filters_el.onclick = handle_filter_click
+  left_arrow_el.onclick = handle_left_arrow_click
+  right_arrow_el.onclick = handle_right_arrow_click
+  filters_el.onscroll = handle_filter_scroll
+
+  await load_style()
+  await sdb.watch(handle_state_batch)
+  await load_filter_state()
+
+  return el
+
+  function io_feed_view () {
+    const on = { refresh: on_refresh, provision: on_provision }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_refresh () { load_filter_state() }
+    function on_provision (m) { save_filter_payload(m.data) }
+  }
+
+  async function handle_state_batch (batch) {
+    if (!Array.isArray(batch)) return
+    if (batch.some(should_reload_style)) await load_style()
+    if (batch.some(should_reload_state)) await load_filter_state()
+  }
+
+  function should_reload_style (entry) {
+    return entry && entry.type === 'theme'
+  }
+
+  function should_reload_state (entry) {
+    return entry && entry.type === 'runtime'
+  }
+
+  async function load_style () {
+    const style_file = await get_drive_file('theme/feed-filters.css')
+    if (style_file && style_file.raw) sheet.replaceSync(style_file.raw)
+  }
+
+  async function load_filter_state () {
+    const payload_file = await get_drive_file('runtime/feed_filters.json')
+    const active_file = await get_drive_file('runtime/feed_filters_active_tag.json')
+    const payload = parse_json_file(payload_file, null)
+    if (!payload) {
+      render()
+      return
+    }
+    const items = Array.isArray(payload.items) ? payload.items : []
+
+    apply_filter_state(items, normalize_tag(active_file && active_file.raw))
+    render()
+  }
+
+  async function handle_filter_click (event) {
+    const target = event.target.nodeType === 1 ? event.target : event.target.parentElement
+    const button = target.closest('.feed-filter-button')
+    if (!button) return
+
+    const index = get_button_index(button)
+    const next_filter = filter_state.filter_tags[index]
+    if (!next_filter || next_filter.value === filter_state.active_tag) return
+
+    filter_state.scroll_left = filters_el.scrollLeft
+    filter_state.active_tag = next_filter.value
+    render()
+    if (_.feed_view) _.feed_view('filter_changed', {}, { active_tag: next_filter.value })
+    persist_selected_filter(next_filter.value)
+  }
+
+  function get_button_index (button) {
+    const buttons = Array.prototype.slice.call(shadow.querySelectorAll('.feed-filter-button'))
+    return buttons.indexOf(button)
+  }
+
+  function render () {
+    const scroll_left = filter_state.scroll_left
+    const buttons_html = filter_state.filter_tags.map(render_filter_button).join('')
+    filters_el.innerHTML = buttons_html
+    filters_el.scrollLeft = scroll_left
+    schedule_arrow_update()
+  }
+
+  function render_filter_button (filter) {
+    const is_active = filter.value === filter_state.active_tag
+    const active_class = is_active ? ' is-active' : ''
+    const pressed = is_active ? 'true' : 'false'
+    const label = escape_html(filter.label)
+
+    return `
+      <button class="feed-filter-button${active_class}" type="button" aria-pressed="${pressed}">
+        ${label}
+      </button>
+    `
+  }
+
+  function build_filter_tags (items) {
+    const filter_map = {}
+
+    items.forEach(collect_item_tags)
+
+    const dynamic_tags = Object.keys(filter_map).sort(sort_filter_values).map(map_filter_value)
+    return [{ value: 'all', label: 'All' }].concat(dynamic_tags)
+
+    function collect_item_tags (item) {
+      const tags = get_item_tags(item)
+      tags.forEach(collect_tag)
+    }
+
+    function collect_tag (tag) {
+      const value = normalize_tag(tag)
+      if (!value || value === 'all') return
+      if (!filter_map[value]) filter_map[value] = { count: 0, label: format_tag_label(value) }
+      filter_map[value].count += 1
+    }
+
+    function sort_filter_values (left, right) {
+      return filter_map[right].count - filter_map[left].count || filter_map[left].label.localeCompare(filter_map[right].label)
+    }
+
+    function map_filter_value (value) {
+      return { value, label: filter_map[value].label }
+    }
+  }
+
+  function get_item_tags (item) {
+    const data = item && item.data ? item.data : {}
+    return Array.isArray(data.tags) ? data.tags : []
+  }
+
+  function has_filter_tag (value) {
+    return filter_state.filter_tags.some(match_filter_tag)
+
+    function match_filter_tag (filter) {
+      return filter.value === value
+    }
+  }
+
+  function normalize_tag (tag) {
+    return String(tag || '').trim().replace(/^#+/, '').toLowerCase()
+  }
+
+  function format_tag_label (tag) {
+    return tag.replace(/[-_]+/g, ' ').replace(/\b\w/g, uppercase_match)
+  }
+
+  function uppercase_match (match) {
+    return match.toUpperCase()
+  }
+
+  function parse_json_file (file, fallback) {
+    if (!file || !file.raw) return fallback
+    try {
+      return JSON.parse(file.raw)
+    } catch (e) {
+      return fallback
+    }
+  }
+
+  function save_filter_payload (payload) {
+    const data = normalize_payload(payload)
+    apply_filter_state(data.items, 'all')
+    render()
+    persist_filter_payload(data)
+  }
+
+  function normalize_payload (payload) {
+    const data = payload || {}
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      folder_name: data.folder_name || ''
+    }
+  }
+
+  function apply_filter_state (items, active_tag) {
+    filter_state.items = items
+    filter_state.filter_tags = build_filter_tags(items)
+    filter_state.active_tag = active_tag
+
+    if (!has_filter_tag(filter_state.active_tag)) {
+      filter_state.active_tag = 'all'
+    }
+  }
+
+  async function get_drive_file (path) {
+    try {
+      return await drive.get(path)
+    } catch (e) {
+      return null
+    }
+  }
+
+  async function persist_selected_filter (value) {
+    try {
+      await drive.put('runtime/feed_filters_active_tag.json', value)
+    } catch (e) {}
+  }
+
+  async function persist_filter_payload (data) {
+    try {
+      await drive.put('runtime/feed_filters.json', JSON.stringify(data))
+      await drive.put('runtime/feed_filters_active_tag.json', 'all')
+    } catch (e) {}
+  }
+
+  function escape_html (value) {
+    return String(value).replace(/[&<>"']/g, replace_html_char)
+  }
+
+  function replace_html_char (char) {
+    return html_entities[char]
+  }
+
+  function handle_left_arrow_click () {
+    scroll_filters(-1)
+  }
+
+  function handle_right_arrow_click () {
+    scroll_filters(1)
+  }
+
+  function handle_filter_scroll () {
+    filter_state.scroll_left = filters_el.scrollLeft
+    update_arrow_state()
+  }
+
+  function scroll_filters (direction) {
+    const distance = Math.max(160, Math.floor(filters_el.clientWidth * 0.7))
+    filters_el.scrollBy({ left: direction * distance, behavior: 'smooth' })
+  }
+
+  function schedule_arrow_update () {
+    requestAnimationFrame(update_arrow_state)
+  }
+
+  function update_arrow_state () {
+    const max_scroll = filters_el.scrollWidth - filters_el.clientWidth
+    const has_overflow = max_scroll > 2
+    if (filter_state.scroll_left > max_scroll) {
+      filter_state.scroll_left = Math.max(0, max_scroll)
+      filters_el.scrollLeft = filter_state.scroll_left
+    }
+    const show_left = has_overflow && filters_el.scrollLeft > 2
+    const show_right = has_overflow && filters_el.scrollLeft < max_scroll - 2
+
+    shell_el.classList.toggle('has-overflow', has_overflow)
+    left_arrow_el.classList.toggle('is-visible', show_left)
+    right_arrow_el.classList.toggle('is-visible', show_right)
+  }
+}
+
+function fallback_module () {
+  const _ = {
+    net_helper: { $: '' }
+  }
+
+  return { _, api: fallback_instance }
+
+  function fallback_instance () {
+    const drive = {
+      'theme/': {
+        'feed-filters.css': { $ref: 'style.css' }
+      },
+      'runtime/': {}
+    }
+    return { drive }
+  }
+}
+
+}).call(this)}).call(this,"/web/node_modules/feed_filters/index.js")
+},{"STATE":1,"net_helper":10}],7:[function(require,module,exports){
 const STATE = require('STATE')
 
 module.exports = content_parser
@@ -3465,7 +3785,7 @@ async function content_parser (opts, protocol) {
   }
 }
 
-},{"STATE":1}],7:[function(require,module,exports){
+},{"STATE":1}],8:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3473,6 +3793,7 @@ const statedb = STATE(__filename)
 const { get } = statedb(fallback_module)
 const news_list = require('newsfeed_card_list')
 const blog_list = require('blog_card_list')
+const feed_filters = require('feed_filters')
 const net_helper = require('net_helper')
 
 module.exports = feed_view
@@ -3480,17 +3801,24 @@ module.exports = feed_view
 async function feed_view (opts, invite) {
   const { sid } = opts
   const { id, sdb } = await get(sid)
+  const { drive } = sdb
 
   const { io, _ } = net_helper(id)
   io.on.news = io_news()
   io.on.news_list = io_news_list()
   io.on.blog_list = io_blog_list()
+  io.on.feed_filters = io_feed_filters()
   if (invite) io.accept(invite)
 
   const element = document.createElement('div')
 
   let news_list_el = null
   let blog_list_el = null
+  let filter_el = null
+  let current_feed_type = 'news'
+  let current_items = []
+  let current_folder_name = ''
+  let current_active_tag = 'all'
 
   const subs = await sdb.watch(handle_watch)
 
@@ -3499,6 +3827,9 @@ async function feed_view (opts, invite) {
   }
   if (subs && subs.length > 1) {
     blog_list_el = await blog_list({ sid: subs[1].sid }, io.invite('blog_list', { feed: id }))
+  }
+  if (subs && subs.length > 2) {
+    filter_el = await feed_filters({ sid: subs[2].sid }, io.invite('feed_filters', { feed_view: id }))
   }
 
   element.addEventListener('click', handle_element_click)
@@ -3535,16 +3866,93 @@ async function feed_view (opts, invite) {
     }
   }
 
-  function show_news_feed (data) {
-    if (news_list_el) element.replaceChildren(news_list_el)
-    else element.replaceChildren()
-    _.news_list('provision', {}, data)
+  function io_feed_filters () {
+    const on = { filter_changed: on_filter_changed }
+    return protocol
+    function protocol (m) { (on[m.type] || on_fail)(m) }
+    function on_fail () { }
+    function on_filter_changed (m) { handle_filter_changed(m.data) }
   }
 
-  function show_blog_feed (data) {
-    if (blog_list_el) element.replaceChildren(blog_list_el)
-    else element.replaceChildren()
-    _.blog_list('provision', {}, data)
+  async function show_news_feed (data) {
+    current_feed_type = 'news'
+    await update_filter_state(data)
+    render_current_feed()
+  }
+
+  async function show_blog_feed (data) {
+    current_feed_type = 'blog'
+    await update_filter_state(data)
+    render_current_feed()
+  }
+
+  async function update_filter_state (data) {
+    current_items = Array.isArray(data.items) ? data.items : []
+    current_folder_name = data.folder_name || ''
+    current_active_tag = 'all'
+    if (_.feed_filters) _.feed_filters('provision', {}, { items: current_items, folder_name: current_folder_name })
+    persist_filter_state()
+  }
+
+  async function read_selected_filter () {
+    const active_file = await drive.get('runtime/feed_filters_active_tag.json')
+    current_active_tag = normalize_filter_tag(active_file && active_file.raw)
+    render_current_feed()
+  }
+
+  function handle_filter_changed (data) {
+    if (data && data.active_tag) {
+      current_active_tag = normalize_filter_tag(data.active_tag)
+      render_current_feed()
+      return
+    }
+    read_selected_filter()
+  }
+
+  function render_current_feed () {
+    const filtered_items = filter_items_by_tag(current_items, current_active_tag)
+    const payload = { items: filtered_items, folder_name: current_folder_name }
+
+    if (current_feed_type === 'news') {
+      mount_feed_elements(news_list_el)
+      _.news_list('provision', {}, payload)
+    } else {
+      mount_feed_elements(blog_list_el)
+      _.blog_list('provision', {}, payload)
+    }
+  }
+
+  function mount_feed_elements (list_el) {
+    const children = []
+    if (filter_el) children.push(filter_el)
+    if (list_el) children.push(list_el)
+    element.replaceChildren(...children)
+  }
+
+  function filter_items_by_tag (items, active_tag) {
+    if (active_tag === 'all') return items
+    return items.filter(matches_active_tag)
+
+    function matches_active_tag (item) {
+      const tags = get_item_tags(item).map(normalize_filter_tag)
+      return tags.includes(active_tag)
+    }
+  }
+
+  function get_item_tags (item) {
+    const data = item && item.data ? item.data : {}
+    return Array.isArray(data.tags) ? data.tags : []
+  }
+
+  function normalize_filter_tag (tag) {
+    return String(tag || '').trim().replace(/^#+/, '').toLowerCase() || 'all'
+  }
+
+  async function persist_filter_state () {
+    try {
+      await drive.put('runtime/feed_filters.json', JSON.stringify({ items: current_items, folder_name: current_folder_name }))
+      await drive.put('runtime/feed_filters_active_tag.json', current_active_tag)
+    } catch (e) {}
   }
 
   function show_article (payload) {
@@ -3609,6 +4017,7 @@ function fallback_module () {
   const _ = {
     newsfeed_card_list: { $: '' },
     blog_card_list: { $: '' },
+    feed_filters: { $: '' },
     net_helper: { $: '' }
   }
 
@@ -3623,12 +4032,21 @@ function fallback_module () {
       blog_card_list: {
         0: '',
         mapping: { runtime: 'runtime', theme: 'theme' }
+      },
+      feed_filters: {
+        0: '',
+        mapping: { runtime: 'runtime', theme: 'theme' }
       }
     }
 
     const drive = {
+      'theme/': {
+        'feed-filters.css': { $ref: '../feed_filters/style.css' }
+      },
       'runtime/': {
-        'viewer_data.json': { raw: '{}' }
+        'viewer_data.json': { raw: '{}' },
+        'feed_filters.json': { raw: '{"items":[]}' },
+        'feed_filters_active_tag.json': { raw: 'all' }
       }
     }
 
@@ -3637,7 +4055,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/feed_view/index.js")
-},{"STATE":1,"blog_card_list":4,"net_helper":9,"newsfeed_card_list":13}],8:[function(require,module,exports){
+},{"STATE":1,"blog_card_list":4,"feed_filters":6,"net_helper":10,"newsfeed_card_list":14}],9:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -3849,7 +4267,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/menu_sidebar/index.js")
-},{"STATE":1,"graph-explorer":2,"net_helper":9}],9:[function(require,module,exports){
+},{"STATE":1,"graph-explorer":2,"net_helper":10}],10:[function(require,module,exports){
 (function (__filename){(function (){
 module.exports = net
 
@@ -3906,7 +4324,7 @@ function net(id) {
 }
 
 }).call(this)}).call(this,"/web/node_modules/net_helper/index.js")
-},{}],10:[function(require,module,exports){
+},{}],11:[function(require,module,exports){
 module.exports = graphdb
 
 function graphdb (entries) {
@@ -3957,7 +4375,7 @@ function graphdb (entries) {
   }
 }
 
-},{}],11:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4140,7 +4558,7 @@ async function news_app (opts, protocol) {
     }
   }
 
-  function handle_shadow_submit (e) {
+  async function handle_shadow_submit (e) {
     if (e.target.id === 'write-story-form') {
       e.preventDefault()
       const create_story_data = {
@@ -4148,7 +4566,7 @@ async function news_app (opts, protocol) {
         content: e.target.content.value,
         blog: e.target.blog.value
       }
-      handle_publish(create_story_data)
+      await handle_publish(create_story_data)
     }
   }
 
@@ -4175,7 +4593,7 @@ async function news_app (opts, protocol) {
     `
   }
 
-  function handle_publish (data) {
+  async function handle_publish (data) {
     const new_story = {
       title: data.title,
       content: data.content,
@@ -4185,7 +4603,7 @@ async function news_app (opts, protocol) {
       tags: ['#local', '#' + data.blog.replace(/\s+/g, '')],
       color: '#6366f1'
     }
-    save_local_story(new_story)
+    await save_local_story(new_story)
     alert('Story published locally!')
     render_content(active_path)
   }
@@ -4288,8 +4706,7 @@ async function news_app (opts, protocol) {
     let fetched_items = []
 
     if (node_type === 'my-blog') {
-      const local_stories = get_local_stories()
-      fetched_items = local_stories.map(map_local_story)
+      fetched_items = await get_local_stories()
     } else if (node.posts) {
       for (const post_path of node.posts) {
         const post_data = await fetch_post_data(post_path)
@@ -4341,22 +4758,11 @@ async function news_app (opts, protocol) {
     main_viewer.replaceChildren(write_el)
   }
 
-  function map_local_story (s, i) {
-    return { path: `local-${i}`, data: s }
-  }
-
   async function fetch_post_data (post_path) {
-    if (post_path.startsWith('local-')) {
-      const idx = parseInt(post_path.slice(6), 10)
-      const stories = get_local_stories()
-      return stories[idx] || null
-    }
-
     try {
       const file = await drive.get(post_path)
       if (file && file.raw) {
-        const parsed = await content_parser({ raw: file.raw })
-        return parsed
+        return parse_post_file(file.raw)
       }
     } catch (e) { }
     return null
@@ -4368,17 +4774,54 @@ async function news_app (opts, protocol) {
     return path.split('|').pop() || '/'
   }
 
-  function get_local_stories () {
+  async function get_local_stories () {
     try {
-      const stories = localStorage.getItem('p2p_stories')
-      return stories ? JSON.parse(stories) : []
-    } catch (e) { return [] }
+      const index = await get_local_story_index()
+      const stories = []
+      for (const story_path of index) {
+        const story = await fetch_post_data(story_path)
+        if (story) stories.push({ path: story_path, data: story })
+      }
+      return stories
+    } catch (e) {
+      return []
+    }
   }
 
-  function save_local_story (story) {
-    const stories = get_local_stories()
-    stories.unshift(story)
-    localStorage.setItem('p2p_stories', JSON.stringify(stories))
+  async function save_local_story (story) {
+    const index = await get_local_story_index()
+    const path = create_local_story_path(story)
+    await drive.put(path, JSON.stringify(story))
+    index.unshift(path)
+    await drive.put('runtime/local_stories.json', JSON.stringify(index))
+  }
+
+  async function get_local_story_index () {
+    try {
+      const file = await drive.get('runtime/local_stories.json')
+      if (!file || !file.raw) return []
+      const index = JSON.parse(file.raw)
+      return Array.isArray(index) ? index : []
+    } catch (e) {
+      return []
+    }
+  }
+
+  function create_local_story_path (story) {
+    const id = [Date.now(), slugify(story.title || 'story')].join('-')
+    return `runtime/local_story_${id}.json`
+  }
+
+  function slugify (value) {
+    return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  }
+
+  async function parse_post_file (raw) {
+    try {
+      return JSON.parse(raw)
+    } catch (e) {
+      return content_parser({ raw })
+    }
   }
 
   function handle_db_request (request_msg) {
@@ -4481,12 +4924,16 @@ function fallback_module () {
         },
         'blog-card.css': {
           $ref: '../blog_cards/blog-card.css'
+        },
+        'feed-filters.css': {
+          $ref: '../feed_filters/style.css'
         }
       },
       'style/': {},
       'runtime/': {
         'viewer_data.json': { raw: '{}' },
-        'write_data.json': { raw: '{}' }
+        'write_data.json': { raw: '{}' },
+        'local_stories.json': { raw: '[]' }
       },
       'mode/': {},
       'flags/': {},
@@ -4515,7 +4962,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news/index.js")
-},{"./graphdb":10,"STATE":1,"feed_view":7,"feed_view/content_parser":6,"menu_sidebar":8,"net_helper":9,"write_page":14}],12:[function(require,module,exports){
+},{"./graphdb":11,"STATE":1,"feed_view":8,"feed_view/content_parser":7,"menu_sidebar":9,"net_helper":10,"write_page":15}],13:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4604,7 +5051,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/news_cards/index.js")
-},{"STATE":1,"net_helper":9}],13:[function(require,module,exports){
+},{"STATE":1,"net_helper":10}],14:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4711,7 +5158,7 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/newsfeed_card_list/index.js")
-},{"STATE":1,"net_helper":9,"news_cards":12}],14:[function(require,module,exports){
+},{"STATE":1,"net_helper":10,"news_cards":13}],15:[function(require,module,exports){
 (function (__filename){(function (){
 const STATE = require('STATE')
 const statedb = STATE(__filename)
@@ -4811,9 +5258,8 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/node_modules/write_page/index.js")
-},{"STATE":1,"net_helper":9}],15:[function(require,module,exports){
+},{"STATE":1,"net_helper":10}],16:[function(require,module,exports){
 (function (__filename){(function (){
-localStorage.clear()
 const STATE = require('STATE')
 const statedb = STATE(__filename)
 statedb.admin()
@@ -4857,6 +5303,7 @@ function fallback_module () {
         0: {
           _: {
             feed_view: { $: '' },
+            feed_filters: { $: '' },
             write_page: { $: '' },
             './graphdb': { $: '' },
             'feed_view/content_parser': { $: '' },
@@ -4885,7 +5332,8 @@ function fallback_module () {
       'theme/': {},
       'runtime/': {
         'viewer_data.json': { raw: '{}' },
-        'write_data.json': { raw: '{}' }
+        'write_data.json': { raw: '{}' },
+        'local_stories.json': { raw: '[]' }
       },
       'mode/': {},
       'flags/': {},
@@ -4900,4 +5348,4 @@ function fallback_module () {
 }
 
 }).call(this)}).call(this,"/web/page.js")
-},{"STATE":1,"news":11}]},{},[15]);
+},{"STATE":1,"news":12}]},{},[16]);
