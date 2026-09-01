@@ -359,6 +359,8 @@ function show_system_bar () {
         <button class="tab-btn" data-section="invite">Invite</button>
         <button class="tab-btn" data-section="devices">Devices</button>
         <button class="tab-btn" data-section="relays">Relays</button>
+        <button class="tab-btn" data-section="net">Net</button>
+        <button class="tab-btn" data-section="performance">Performance</button>
         <button class="tab-btn" data-section="apps">Apps</button>
         <button class="tab-btn" data-section="audit">Vault Log</button>
         <button class="reset-btn" style="margin-left:auto">Reset All Data</button>
@@ -382,6 +384,12 @@ function show_system_bar () {
           <button class="relay-add-btn">Add</button>
         </div>
         <div class="relays-list">No relays configured.</div>
+      </div>
+      <div class="section-net" style="display:none">
+        <div class="net-list">No active networks.</div>
+      </div>
+      <div class="section-performance" style="display:none">
+        <div class="performance-list">Waiting for the first sample...</div>
       </div>
       <div class="section-apps" style="display:none">
         <div class="apps-mgmt-list">Loading...</div>
@@ -439,6 +447,8 @@ function show_system_bar () {
       active_tab = s
       if (s === 'devices') load_devices()
       if (s === 'relays') load_relays()
+      if (s === 'net') load_network_diagnostics()
+      if (s === 'performance') load_performance()
       if (s === 'apps') load_apps_mgmt()
       if (s === 'audit') load_vault_audit()
     })
@@ -447,9 +457,11 @@ function show_system_bar () {
     render_device_header(vault)
     if (active_tab === 'devices') load_devices()
     if (active_tab === 'relays') load_relays()
+    if (active_tab === 'net') load_network_diagnostics()
     if (active_tab === 'apps') load_apps_mgmt()
     if (active_tab === 'audit') load_vault_audit()
   })
+  vault.on_performance_sample(render_performance_if_active)
   restore_pending_invites_if_any()
 
   /***************************************
@@ -626,6 +638,46 @@ function show_system_bar () {
   async function handle_relay_set_default (url) {
     await vault.vault_put('config/default_relay', url)
     load_relays()
+  }
+
+  /***************************************
+  NETWORK DIAGNOSTICS
+  ***************************************/
+  function load_network_diagnostics () {
+    const el = sys.querySelector('.net-list')
+    const networks = vault.get_network_diagnostics()
+    el.innerHTML = ''
+    if (!networks.length) {
+      el.appendChild(document.createTextNode('No active networks.'))
+      return
+    }
+    for (const network of networks) {
+      const card = document.createElement('pre')
+      card.style.cssText = 'border:1px solid #ccc;padding:6px;margin:4px 0;white-space:pre-wrap;word-break:break-all;background:#fafafa'
+      card.appendChild(document.createTextNode(format_network_diagnostics(network)))
+      el.appendChild(card)
+    }
+  }
+
+  /***************************************
+  PERFORMANCE MONITORING
+  ***************************************/
+  function render_performance_if_active () {
+    if (active_tab === 'performance') load_performance()
+  }
+
+  function load_performance () {
+    const el = sys.querySelector('.performance-list')
+    const samples = vault.get_performance_samples()
+    el.innerHTML = ''
+    if (!samples.length) {
+      el.appendChild(document.createTextNode('Waiting for the first sample...'))
+      return
+    }
+    const output = document.createElement('pre')
+    output.style.cssText = 'border:1px solid #ccc;padding:6px;margin:4px 0;white-space:pre-wrap;word-break:break-word;background:#fafafa'
+    output.appendChild(document.createTextNode(format_performance_samples(samples)))
+    el.appendChild(output)
   }
 
   /***************************************
@@ -860,6 +912,88 @@ async function render_device_header (vault) {
     document.body.insertBefore(header, document.body.firstChild)
   }
   header.textContent = '🖥️ Active Device: ' + device_name
+}
+
+/***************************************
+FORMAT NETWORK DIAGNOSTICS
+***************************************/
+function format_network_diagnostics (network) {
+  const lines = [
+    'Source: ' + network.source,
+    'Action: ' + network.actions.join(', '),
+    'Local public key: ' + network.local_key,
+    'Environment: ' + network.environment
+  ]
+  if (network.relay_url) lines.push('Web relay: ' + network.relay_url)
+  if (!network.topics.length) lines.push('Contexts: direct device connections')
+  for (const topic of network.topics) {
+    const roles = [topic.client ? 'lookup' : null, topic.server ? 'announce' : null].filter(x => x).join(', ')
+    lines.push('Topic: ' + topic.key + ' (' + roles + ')')
+  }
+  lines.push('Active connections: ' + network.connections.length)
+  for (const connection of network.connections) {
+    const context = connection.direct
+      ? 'direct device'
+      : connection.topics.length ? 'topic ' + connection.topics.join(', ') : 'network context'
+    lines.push('  ' + connection.remote_key + ' | ' + connection.direction + ' | ' + context + ' | ' + connection.transport + ' | peer ' + connection.peer_mode)
+  }
+  return lines.join('\n')
+}
+
+/***************************************
+FORMAT PERFORMANCE SAMPLES
+***************************************/
+function format_performance_samples (samples) {
+  const stats = samples[samples.length - 1]
+  const heap = stats.memory.heap
+  const ua = stats.memory.ua
+  const storage = stats.storage
+  const network = stats.network
+  const lag = stats.lag
+  const recent_heap = samples.slice(-10).map(function (sample) {
+    return format_bytes(sample.memory.heap?.used)
+  }).join(' -> ')
+  return [
+    'Samples retained: ' + samples.length + ' (2 second interval)',
+    'Last sample: ' + new Date(stats.time).toLocaleString(),
+    '',
+    'JS heap used: ' + format_bytes(heap?.used),
+    'JS heap allocated: ' + format_bytes(heap?.total),
+    'JS heap limit: ' + format_bytes(heap?.limit),
+    'User-agent memory: ' + format_bytes(ua?.bytes),
+    'Storage usage: ' + format_bytes(storage?.usage),
+    'Storage quota: ' + format_bytes(storage?.quota),
+    '',
+    'Resources observed: ' + network.requests,
+    'Bytes transferred: ' + format_bytes(network.transferred),
+    'Bytes decoded: ' + format_bytes(network.decoded),
+    '',
+    'Event-loop lag now: ' + format_ms(lag.current),
+    'Worst event-loop lag: ' + format_ms(lag.worst),
+    'Long tasks observed: ' + lag.long_count,
+    'Worst long task: ' + format_ms(lag.worst_long),
+    'Long tasks in this sample: ' + (lag.long.length ? lag.long.map(task => format_ms(task.duration)).join(', ') : 'none'),
+    '',
+    'Recent JS heap trend: ' + recent_heap
+  ].join('\n')
+}
+
+/***************************************
+FORMAT BYTES
+***************************************/
+function format_bytes (bytes) {
+  if (typeof bytes !== 'number') return 'unavailable'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+  return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'
+}
+
+/***************************************
+FORMAT MILLISECONDS
+***************************************/
+function format_ms (ms) {
+  return typeof ms === 'number' ? ms.toFixed(1) + ' ms' : 'unavailable'
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
