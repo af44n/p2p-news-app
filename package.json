@@ -109,5 +109,8 @@
     "hypercore": "10.38.2",
     "mirror-drive": "1.10.0",
     "hyperbee": "2.26.5"
+  },
+  "allowScripts": {
+    "postinstall-postinstall@2.1.0": true
   }
 }
