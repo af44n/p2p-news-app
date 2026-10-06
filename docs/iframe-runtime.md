@@ -6,11 +6,10 @@ A small browser runtime for running code inside a sandboxed iframe and talking t
 
 - Creates an iframe inside a closed Shadow DOM
 - Runs the iframe with `sandbox="allow-scripts"`
-- Gives the host and iframe a connected `MessagePort`
+- Gives the host and iframe a plain, connected `MessagePort`
+- Gives both sides `tx()` to create messages in one shared format
 - Supports controlled and sandboxed modes
-- Adds small `request()` and `handle()` RPC helpers
-- Keeps the raw MessagePorts available for normal messages
-- Cleans up the iframe, port, RPC handlers, and pending requests
+- Cleans up the iframe, port, and Blob URL
 
 **Note:** This is a reusable iframe building block. A virtual device is one thing we can make with it, but the iframe itself is not specifically a virtual device.
 
@@ -19,22 +18,25 @@ A small browser runtime for running code inside a sandboxed iframe and talking t
 ```javascript
 const vm = require('iframe-runtime')
 
-const view = vm(run_child, on_ready, { mode: 'sandboxed' })
+const tx = vm.make_tx('host')
+const view = vm(run_child, on_ready, { mode: 'sandboxed', id: 'child' })
 document.body.appendChild(view)
 
-function run_child (port) {
-  port.handle('greet', greet)
-
-  function greet (name) { return `Hello ${name}` }
+function run_child (port, tx) {
+  port.onmessage = onmessage
+  function onmessage (event) {
+    const msg = event.data
+    if (msg.type === 'greet') port.postMessage(tx({ to: msg.head[0], type: 'reply', data: `Hello ${msg.data}`, refs: { cause: msg.head } }))
+  }
 }
 
-async function on_ready (port) {
-  const greeting = await port.request('greet', 'alice')
-  console.log(greeting)
+function on_ready (port) {
+  port.onmessage = event => console.log(event.data.data) // Hello alice
+  port.postMessage(tx({ to: 'child', type: 'greet', data: 'alice' }))
 }
 ```
 
-`vm()` returns the host view straight away. Append it to the document so the iframe can load. `on_ready()` runs once the host and child ports are connected.
+`vm()` returns the host view straight away. Append it to the document so the iframe can load. `on_ready(port, view)` runs once the host and child ports are connected.
 
 The child function is turned into source and evaluated inside the iframe, so it cannot use variables from the closure where it was originally written. Send anything it needs through the port.
 
@@ -43,96 +45,78 @@ The child function is turned into source and evaluated inside the iframe, so it 
 ```javascript
 const view = vm(run_child, on_ready, {
   mode: 'sandboxed',
+  id: 'child',
   document,
   title: 'My sandbox'
 })
 ```
 
 - `mode` - `controlled` by default, or `sandboxed`
+- `id` - the child's address, used as `by` in the child's messages (default `vm`)
 - `document` - document used to create the iframe and host view
 - `title` - accessible title for the iframe
+
+## Messages
+
+Every message has the same shape:
+
+```javascript
+{ head, refs, type, data, meta }
+```
+
+- `head` - `[by, to, mid]`: sender address, receiver address, message id
+- `mid` - starts at 0 and counts up for every message the same sender sends to the same receiver
+- `refs` - links to other messages, e.g. a reply has `refs.cause = msg.head` of the message it answers
+- `type` - a string
+- `data` - anything that belongs to the type
+- `meta` - `{ time, stack }`
+
+`make_tx(by)` returns `tx`, which creates these messages and keeps the counters:
+
+```javascript
+const tx = vm.make_tx('host')
+port.postMessage(tx({ to: 'child', type: 'ping', data: 1 }))
+```
+
+The child gets its own `tx` (with `by` set to `options.id`) as its second argument. The host makes one with `vm.make_tx('host')`. Use one `tx` per sender so its message ids never repeat.
+
+A common way to wait for replies:
+
+```javascript
+const wait = {}
+port.onmessage = onmessage
+
+function ask (type, data, on_answer) {
+  const msg = tx({ to: 'child', type, data })
+  wait[msg.head] = on_answer
+  port.postMessage(msg)
+}
+
+function onmessage (event) {
+  const msg = event.data
+  const answer = wait[msg.refs.cause]
+  if (answer) return answer(msg)
+  // otherwise handle msg.type
+}
+```
 
 ## Modes
 
 ### Sandboxed
 
-Sandboxed mode runs the first child function and then only accepts the messages and RPC handlers that the child chooses to support.
-
-```javascript
-function run_child (port) {
-  port.handle('ping', ping)
-
-  function ping (value) { return value }
-}
-```
-
-The host cannot send more code for execution in this mode.
+Sandboxed mode runs the first child function and then only reacts to the messages the child code chooses to handle. The host cannot send more code for execution.
 
 ### Controlled
 
-Controlled mode is mainly for simulations and host-owned testing. After the first function runs, the host can send more source code to execute inside the iframe.
+Controlled mode is mainly for simulations and host-owned testing. After the first function runs, the host can send more source code to execute inside the iframe with a `run` message. The code gets `port` and `tx`:
 
 ```javascript
-function on_ready (port) {
-  port.postMessage({
-    source: 'port.postMessage({ type: "executed" })'
-  })
-}
+port.postMessage(tx({ to: 'child', type: 'run', data: 'port.postMessage(tx({ to: "host", type: "executed" }))' }))
 ```
+
+If code throws, the child sends `{ type: 'error', data: err.message }` to `host`.
 
 Do not give a controlled port to untrusted code because whoever controls that port can run code inside the iframe.
-
-## RPC Helpers
-
-RPC here is just request and response messaging. One side asks the other side to run a named handler and send the result back.
-
-```javascript
-port.handle('add', add)
-
-function add ({ first, second }) {
-  return first + second
-}
-```
-
-The other side can call it with:
-
-```javascript
-const total = await port.request('add', {
-  first: 2,
-  second: 3
-})
-```
-
-Available helpers:
-
-```javascript
-port.handle(name, handler)
-port.request(name, data)
-port.stop_rpc()
-```
-
-- `handle()` adds or removes a named handler
-- `request()` returns a promise with the result from the other side
-- `stop_rpc()` removes handlers and rejects pending requests
-
-Unsupported handlers and errors reject the request instead of leaving it hanging.
-
-## Raw Messages
-
-The RPC helpers do not replace the normal `MessagePort` API. Both sides can still send their own message types.
-
-```javascript
-function run_child (port) {
-  port.addEventListener('message', receive)
-  port.postMessage({ type: 'child-ready' })
-
-  function receive (event) {
-    if (event.data?.type === 'notice') console.log(event.data.value)
-  }
-}
-```
-
-The RPC helper internally uses `rpc-request` and `rpc-response`, so other code should avoid using those two message types.
 
 ## Cleanup
 
@@ -140,20 +124,11 @@ The RPC helper internally uses `rpc-request` and `rpc-response`, so other code s
 view.close()
 ```
 
-Closing the view:
-
-- tells the child port to close
-- rejects pending host RPC requests
-- removes RPC listeners and handlers
-- closes the host port
-- removes the iframe and host view
-- revokes the generated Blob URL
-
-Calling `close()` again does nothing, so cleanup is safe to repeat.
+Closing the view closes the host port, removes the iframe and host view, and revokes the generated Blob URL. Calling `close()` again does nothing, so cleanup is safe to repeat.
 
 ## Virtual Devices
 
-The `virtual-device` module uses this runtime to create multiple local iframe devices.
+The `virtual-device` module uses this runtime to create multiple local iframe devices. Each device's `id` is its address.
 
 ```javascript
 const virtual_device = require('virtual-device')
@@ -165,6 +140,11 @@ const device_b = devices.create(run_child, { id: 'device-b' })
 document.body.append(device_a.view, device_b.view)
 devices.connect(device_a.id, device_b.id)
 ```
+
+- A device sends to another device by addressing it: `port.postMessage(tx({ to: 'device-b', type: 'note', data }))`. The host routes it unchanged.
+- Messages are only routed between connected devices, and only if `head[0]` is the device that really sent it.
+- A failed route comes back to the sender as `{ type: 'error', refs: { cause: msg.head } }`.
+- The host talks to devices through `device.port` and `devices.tx`, so all host messages share one set of counters.
 
 The devices still communicate locally through MessageChannels. There is no Hyperdrive, Hyperswarm, real pairing, or other p2p overhead yet.
 
@@ -179,4 +159,4 @@ function show_results (results) { console.table(results) }
 function show_error (error) { console.error(error) }
 ```
 
-The scenarios create three devices and check RPC both ways, isolated runtime state, connected and disconnected routing, and cleanup.
+The scenarios create three devices and check messages both ways, the message format and counters, isolated runtime state, connected and disconnected routing, forged senders, and cleanup.
