@@ -105,15 +105,11 @@
     "browserify": "^17.0.0",
     "budo": "^11.8.4",
     "patch-package": "^8.0.0",
-    "postinstall-postinstall": "^2.1.0",
     "standardx": "^7.0.0"
   },
   "overrides": {
     "hypercore": "10.38.2",
     "mirror-drive": "1.10.0",
     "hyperbee": "2.26.5"
-  },
-  "allowScripts": {
-    "postinstall-postinstall@2.1.0": true
   }
 }
