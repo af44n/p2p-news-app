@@ -92,10 +92,13 @@ async function check_autodrive () {
   const view_a = drive_a.base.view.drive
   const view_b = drive_b.base.view.drive
   check({ name: 'autodrive: files view has the same key on both devices', ok: b4a.equals(view_a.key, view_b.key), note: `a ${view_a.id.slice(0, 8)}, b ${view_b.id.slice(0, 8)}` })
-  const length = Math.min(view_a.core.length, view_b.core.length)
-  const hash_a = b4a.toString(await view_a.core.treeHash(length), 'hex')
-  const hash_b = b4a.toString(await view_b.core.treeHash(length), 'hex')
-  check({ name: 'autodrive: same hash on both devices, so one dat:// link works everywhere', ok: hash_a === hash_b })
+  // autobase views only have a tree hash on their signed core
+  const signed_a = view_a.core.getBackingCore().session
+  const signed_b = view_b.core.getBackingCore().session
+  const length = Math.min(signed_a.length, signed_b.length)
+  const hash_a = b4a.toString(await signed_a.treeHash(length), 'hex')
+  const hash_b = b4a.toString(await signed_b.treeHash(length), 'hex')
+  check({ name: 'autodrive: same hash on both devices, so one dat:// link works everywhere', ok: length > 0 && hash_a === hash_b, note: `length ${length}` })
   const pinned = view_a.checkout(view_a.version)
   await pinned.ready()
   check({ name: 'autodrive: checkout of the files view works on one device', ok: b4a.toString(await pinned.get('/main.js') || '') === 'from a' })
