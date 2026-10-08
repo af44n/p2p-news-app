@@ -103,7 +103,7 @@ async function check_autodrive () {
   await pinned.ready()
   check({ name: 'autodrive: checkout of the files view works on one device', ok: b4a.toString(await pinned.get('/main.js') || '') === 'from a' })
   await pinned.close()
-  check({ name: 'autodrive: has entry() itself (only base.view.drive has it)', ok: typeof drive_a.entry === 'function' })
+  check({ name: 'autodrive: has entry() itself', ok: typeof drive_a.entry === 'function' })
   const source = new Hyperdrive(store_a.namespace('source'))
   await source.ready()
   await source.put('/c.txt', b4a.from('copied'))
