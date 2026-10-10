@@ -479,10 +479,8 @@ INTERNAL FUNCTIONS
   // syncing the subscriptions between similar devices.
 
   function watch_subscriptions () {
-    const vault_bee = identity.get_vault_bee()
-    if (!vault_bee) return
-    const watcher = vault_bee.watch({ gte: 'p2p-news-app/subscribed_peers', lte: 'p2p-news-app/subscribed_peers' })
-    poll_subscription_watcher(watcher)
+    if (!identity.get_vault_bee()) return
+    poll_subscription_watcher(identity.vault_watch('subscribed_peers'))
   }
 
   async function poll_subscription_watcher (watcher) {
@@ -1095,6 +1093,10 @@ function toString(buffer, encoding, start, end) {
   return toBuffer(buffer).toString(encoding, start, end)
 }
 
+function toHex(buffer, start, end) {
+  return toBuffer(buffer).toString('hex', start, end)
+}
+
 function write(buffer, string, offset, length, encoding) {
   return toBuffer(buffer).write(string, offset, length, encoding)
 }
@@ -1184,6 +1186,7 @@ module.exports = {
   swap64,
   toBuffer,
   toString,
+  toHex,
   write,
   readDoubleBE,
   readDoubleLE,
@@ -4616,7 +4619,7 @@ class Channel {
     this._extensions = null
 
     this._decBound = this._dec.bind(this)
-    this._decAndDestroyBound = this._decAndDestroy.bind(this)
+    this._decAndMaybeDestroyBound = this._decAndMaybeDestroy.bind(this)
 
     this._openedPromise = null
     this._openedResolve = null
@@ -4687,8 +4690,9 @@ class Channel {
     if (--this._active === 0 && this.closed === true) this._destroy()
   }
 
-  _decAndDestroy(err) {
+  _decAndMaybeDestroy(err) {
     this._dec()
+    if (this.closed) return this._mux._warn(err)
     this._mux._safeDestroy(err)
   }
 
@@ -4751,7 +4755,7 @@ class Channel {
   _track(p) {
     if (isPromise(p) === true) {
       this._active++
-      return p.then(this._decBound, this._decAndDestroyBound)
+      return p.then(this._decBound, this._decAndMaybeDestroyBound)
     }
 
     return null
@@ -5219,7 +5223,7 @@ module.exports = class Protomux {
         remoteId = c.uint.decode(state)
         continue
       }
-      state.end = state.start + len
+      state.end = Math.min(state.start + len, end)
       // if batch contains more than one message, cork it so we reply back with a batch
       if (end !== state.end && waiting === null) {
         waiting = []
@@ -5387,6 +5391,11 @@ module.exports = class Protomux {
     this.stream.destroy(err)
   }
 
+  _warn(err) {
+    safetyCatch(err)
+    this.stream.emit('warning', err)
+  }
+
   _shutdown() {
     this._destroying = true
     for (const s of this._local) {
@@ -5416,8 +5425,11 @@ function encodingLength(enc, val) {
 }
 
 },{"b4a":5,"compact-encoding":15,"queue-tick":18,"safety-catch":19,"unslab":20}],14:[function(require,module,exports){
-arguments[4][8][0].apply(exports,arguments)
-},{"dup":8}],15:[function(require,module,exports){
+const LE = (exports.LE = new Uint8Array(new Uint16Array([0xff]).buffer)[0] === 0xff)
+
+exports.BE = !LE
+
+},{}],15:[function(require,module,exports){
 const b4a = require('b4a')
 
 const { BE } = require('./endian')
@@ -5596,9 +5608,7 @@ const uint56 = (exports.uint56 = {
   },
   decode(state) {
     if (state.end - state.start < 7) throw new Error('Out of bounds')
-    return validateSafeUint(
-      uint24.decode(state) + 0x1000000 * uint32.decode(state)
-    )
+    return validateSafeUint(uint24.decode(state) + 0x1000000 * uint32.decode(state))
   }
 })
 
@@ -5614,9 +5624,7 @@ const uint64 = (exports.uint64 = {
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    return validateSafeUint(
-      uint32.decode(state) + 0x100000000 * uint32.decode(state)
-    )
+    return validateSafeUint(uint32.decode(state) + 0x100000000 * uint32.decode(state))
   }
 })
 
@@ -5632,9 +5640,7 @@ exports.uint64be = {
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    return validateSafeUint(
-      0x100000000 * uint32be.decode(state) + uint32be.decode(state)
-    )
+    return validateSafeUint(0x100000000 * uint32be.decode(state) + uint32be.decode(state))
   }
 }
 
@@ -5648,27 +5654,32 @@ exports.int48 = zigZagInt(uint48)
 exports.int56 = zigZagInt(uint56)
 exports.int64 = zigZagInt(uint64)
 
+// Constructing a DataView costs more than the read or write it is used for, so
+// keep one per buffer.
+const views = new WeakMap()
+
+function viewOf(buffer) {
+  let view = views.get(buffer)
+
+  if (view === undefined) {
+    view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+    views.set(buffer, view)
+  }
+
+  return view
+}
+
 const biguint64 = (exports.biguint64 = {
   preencode(state, n) {
     state.end += 8
   },
   encode(state, n) {
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    view.setBigUint64(0, n, true) // little endian
+    viewOf(state.buffer).setBigUint64(state.start, n, true) // little endian
     state.start += 8
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    const n = view.getBigUint64(0, true) // little endian
+    const n = viewOf(state.buffer).getBigUint64(state.start, true) // little endian
     state.start += 8
     return n
   }
@@ -5687,12 +5698,8 @@ const biguint = (exports.biguint = {
     let len = 0
     for (let m = n; m; m = m >> 64n) len++
     uint.encode(state, len)
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8 * len
-    )
-    for (let m = n, i = 0; m; m = m >> 64n, i += 8) {
+    const view = viewOf(state.buffer)
+    for (let m = n, i = state.start; m; m = m >> 64n, i += 8) {
       view.setBigUint64(i, BigInt.asUintN(64, m), true) // little endian
     }
     state.start += 8 * len
@@ -5700,14 +5707,11 @@ const biguint = (exports.biguint = {
   decode(state) {
     const len = uint.decode(state)
     if (state.end - state.start < 8 * len) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8 * len
-    )
+    const view = viewOf(state.buffer)
     let n = 0n
-    for (let i = len - 1; i >= 0; i--)
-      n = (n << 64n) + view.getBigUint64(i * 8, true) // little endian
+    for (let i = len - 1; i >= 0; i--) {
+      n = (n << 64n) + view.getBigUint64(state.start + i * 8, true) // little endian
+    }
     state.start += 8 * len
     return n
   }
@@ -5722,22 +5726,12 @@ exports.float32 = {
     state.end += 4
   },
   encode(state, n) {
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      4
-    )
-    view.setFloat32(0, n, true) // little endian
+    viewOf(state.buffer).setFloat32(state.start, n, true) // little endian
     state.start += 4
   },
   decode(state) {
     if (state.end - state.start < 4) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      4
-    )
-    const float = view.getFloat32(0, true) // little endian
+    const float = viewOf(state.buffer).getFloat32(state.start, true) // little endian
     state.start += 4
     return float
   }
@@ -5748,22 +5742,12 @@ exports.float64 = {
     state.end += 8
   },
   encode(state, n) {
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    view.setFloat64(0, n, true) // little endian
+    viewOf(state.buffer).setFloat64(state.start, n, true) // little endian
     state.start += 8
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    const float = view.getFloat64(0, true) // little endian
+    const float = viewOf(state.buffer).getFloat64(state.start, true) // little endian
     state.start += 8
     return float
   }
@@ -5827,6 +5811,7 @@ exports.arraybuffer = {
   },
   decode(state) {
     const len = uint.decode(state)
+    if (state.end - state.start < len) throw new Error('Out of bounds')
 
     const b = new ArrayBuffer(len)
     const view = new Uint8Array(b)
@@ -5834,6 +5819,35 @@ exports.arraybuffer = {
     view.set(state.buffer.subarray(state.start, (state.start += len)))
 
     return b
+  }
+}
+
+exports.bitarray = {
+  preencode(state, m) {
+    uint.preencode(state, m.length)
+    state.end += Math.ceil(m.length / 8)
+  },
+  encode(state, m) {
+    uint.encode(state, m.length)
+    for (let i = 0; i < m.length; i += 8) {
+      let byte = 0
+      for (let j = 0; j < 8 && i + j < m.length; j++) {
+        if (m[i + j]) byte |= 1 << j
+      }
+      state.buffer[state.start++] = byte
+    }
+  },
+  decode(state) {
+    const n = uint.decode(state)
+    if (state.end - state.start < Math.ceil(n / 8)) throw new Error('Out of bounds')
+    const m = new Array(n)
+    for (let i = 0; i < n; i += 8) {
+      const byte = state.buffer[state.start++]
+      for (let j = 0; j < 8 && i + j < n; j++) {
+        m[i + j] = (byte & (1 << j)) !== 0
+      }
+    }
+    return m
   }
 }
 
@@ -5899,12 +5913,7 @@ function string(encoding) {
     decode(state) {
       const len = uint.decode(state)
       if (state.end - state.start < len) throw new Error('Out of bounds')
-      return b4a.toString(
-        state.buffer,
-        encoding,
-        state.start,
-        (state.start += len)
-      )
+      return b4a.toString(state.buffer, encoding, state.start, (state.start += len))
     },
     fixed(n) {
       return {
@@ -5917,19 +5926,132 @@ function string(encoding) {
         },
         decode(state) {
           if (state.end - state.start < n) throw new Error('Out of bounds')
-          return b4a.toString(
-            state.buffer,
-            encoding,
-            state.start,
-            (state.start += n)
-          )
+          return b4a.toString(state.buffer, encoding, state.start, (state.start += n))
         }
       }
     }
   }
 }
 
-const utf8 = (exports.string = exports.utf8 = string('utf-8'))
+// The native codec costs the same for a two character string as for a sixty
+// character one, so below these lengths a hand-rolled ASCII loop wins.
+const ASCII_ENCODE_MAX = 64
+const ASCII_DECODE_MAX = 56
+
+const fromCharCode = String.fromCharCode
+
+// Returns -1 if the string is not ASCII, in which case its UTF-8 length has to
+// be measured by the native codec.
+function asciiLength(s) {
+  const n = s.length
+
+  if (n > ASCII_ENCODE_MAX) return -1
+
+  for (let i = 0; i < n; i++) {
+    if (s.charCodeAt(i) > 0x7f) return -1
+  }
+
+  return n
+}
+
+// Returns false, leaving the state untouched, if the string is not ASCII. The
+// string is checked while being written, which saves a pass over it compared
+// to measuring it first.
+function asciiEncode(state, s) {
+  const len = s.length
+
+  if (len > ASCII_ENCODE_MAX) return false
+
+  const start = state.start
+
+  uint.encode(state, len)
+
+  const buffer = state.buffer
+  const offset = state.start
+
+  for (let i = 0; i < len; i++) {
+    const c = s.charCodeAt(i)
+
+    if (c > 0x7f) {
+      state.start = start
+      return false
+    }
+
+    buffer[offset + i] = c
+  }
+
+  state.start = offset + len
+  return true
+}
+
+// Returns null if the range is not ASCII, in which case it has to be decoded by
+// the native codec. Eight code units per call amortises the call overhead of
+// `String.fromCharCode` without growing the argument list unreasonably.
+function asciiDecode(buffer, start, end) {
+  let s = ''
+  let i = start
+
+  for (; i + 8 <= end; i += 8) {
+    const c0 = buffer[i]
+    const c1 = buffer[i + 1]
+    const c2 = buffer[i + 2]
+    const c3 = buffer[i + 3]
+    const c4 = buffer[i + 4]
+    const c5 = buffer[i + 5]
+    const c6 = buffer[i + 6]
+    const c7 = buffer[i + 7]
+
+    if ((c0 | c1 | c2 | c3 | c4 | c5 | c6 | c7) > 0x7f) return null
+
+    s += fromCharCode(c0, c1, c2, c3, c4, c5, c6, c7)
+  }
+
+  for (; i < end; i++) {
+    const c = buffer[i]
+
+    if (c > 0x7f) return null
+
+    s += fromCharCode(c)
+  }
+
+  return s
+}
+
+const nativeUTF8 = string('utf-8')
+
+const utf8 = {
+  ...nativeUTF8,
+
+  preencode(state, s) {
+    const len = asciiLength(s)
+
+    if (len === -1) return nativeUTF8.preencode(state, s)
+
+    uint.preencode(state, len)
+    state.end += len
+  },
+  encode(state, s) {
+    if (!asciiEncode(state, s)) nativeUTF8.encode(state, s)
+  },
+  decode(state) {
+    const len = uint.decode(state)
+    if (state.end - state.start < len) throw new Error('Out of bounds')
+
+    const buffer = state.buffer
+    const start = state.start
+    const end = (state.start += len)
+
+    if (len <= ASCII_DECODE_MAX) {
+      const s = asciiDecode(buffer, start, end)
+
+      if (s !== null) return s
+    }
+
+    return b4a.toString(buffer, 'utf-8', start, end)
+  }
+}
+
+exports.string = exports.utf8 = utf8
 exports.ascii = string('ascii')
 exports.hex = string('hex')
 exports.base64 = string('base64')
@@ -5965,6 +6087,9 @@ const fixed = (exports.fixed = function fixed(n) {
   }
 })
 
+exports.fixed8 = fixed(8)
+exports.fixed16 = fixed(16)
+exports.fixed24 = fixed(24)
 exports.fixed32 = fixed(32)
 exports.fixed64 = fixed(64)
 
@@ -6006,6 +6131,7 @@ exports.frame = function frame(enc) {
     decode(state) {
       const end = state.end
       const len = uint.decode(state)
+      if (state.start + len > end) throw new Error('Out of bounds')
       state.end = state.start + len
       const m = enc.decode(state)
       state.start = state.end
@@ -6184,10 +6310,7 @@ const ipv4 = (exports.ipv4 = {
       let n = 0
       let c
 
-      while (
-        i < string.length &&
-        (c = string.charCodeAt(i++)) !== /* . */ 0x2e
-      ) {
+      while (i < string.length && (c = string.charCodeAt(i++)) !== /* . */ 0x2e) {
         n = n * 10 + (c - /* 0 */ 0x30)
       }
 
@@ -6227,10 +6350,7 @@ const ipv6 = (exports.ipv6 = {
       let n = 0
       let c
 
-      while (
-        i < string.length &&
-        (c = string.charCodeAt(i++)) !== /* : */ 0x3a
-      ) {
+      while (i < string.length && (c = string.charCodeAt(i++)) !== /* : */ 0x3a) {
         if (c >= 0x30 && c <= 0x39) n = n * 0x10 + (c - /* 0 */ 0x30)
         else if (c >= 0x41 && c <= 0x46) n = n * 0x10 + (c - /* A */ 0x41 + 10)
         else if (c >= 0x61 && c <= 0x66) n = n * 0x10 + (c - /* a */ 0x61 + 10)
@@ -6247,9 +6367,7 @@ const ipv6 = (exports.ipv6 = {
 
     if (split !== null) {
       const offset = end - state.start
-      state.buffer
-        .copyWithin(split + offset, split)
-        .fill(0, split, split + offset)
+      state.buffer.copyWithin(split + offset, split).fill(0, split, split + offset)
     }
 
     state.start = end
@@ -6257,45 +6375,21 @@ const ipv6 = (exports.ipv6 = {
   decode(state) {
     if (state.end - state.start < 16) throw new Error('Out of bounds')
     return (
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16)
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16)
     )
   }
 })
@@ -6540,20 +6634,131 @@ function validateInt(n) {
 // Kept out here, the message costs nothing until it is actually thrown.
 
 function outsideUintRange() {
-  return new Error(
-    `uint must be between 0 and ${Number.MAX_SAFE_INTEGER}, use biguint`
-  )
+  return new Error(`uint must be between 0 and ${Number.MAX_SAFE_INTEGER}, use biguint`)
 }
 
 function outsideIntRange() {
-  return new Error(
-    `int must be between ${MIN_SAFE_INT} and ${MAX_SAFE_INT}, use bigint`
-  )
+  return new Error(`int must be between ${MIN_SAFE_INT} and ${MAX_SAFE_INT}, use bigint`)
 }
 
 },{"./endian":14,"./lexint":16,"./raw":17,"b4a":5}],16:[function(require,module,exports){
-arguments[4][10][0].apply(exports,arguments)
-},{"dup":10}],17:[function(require,module,exports){
+module.exports = {
+  preencode,
+  encode,
+  decode
+}
+
+function preencode(state, num) {
+  if (num < 251) {
+    state.end++
+  } else if (num < 256) {
+    state.end += 2
+  } else if (num < 0x10000) {
+    state.end += 3
+  } else if (num < 0x1000000) {
+    state.end += 4
+  } else if (num < 0x100000000) {
+    state.end += 5
+  } else {
+    state.end++
+    const exp = Math.floor(Math.log(num) / Math.log(2)) - 32
+    preencode(state, exp)
+    state.end += 6
+  }
+}
+
+function encode(state, num) {
+  const max = 251
+  const x = num - max
+
+  if (num < max) {
+    state.buffer[state.start++] = num
+  } else if (num < 256) {
+    state.buffer[state.start++] = max
+    state.buffer[state.start++] = x
+  } else if (num < 0x10000) {
+    state.buffer[state.start++] = max + 1
+    state.buffer[state.start++] = (x >> 8) & 0xff
+    state.buffer[state.start++] = x & 0xff
+  } else if (num < 0x1000000) {
+    state.buffer[state.start++] = max + 2
+    state.buffer[state.start++] = x >> 16
+    state.buffer[state.start++] = (x >> 8) & 0xff
+    state.buffer[state.start++] = x & 0xff
+  } else if (num < 0x100000000) {
+    state.buffer[state.start++] = max + 3
+    state.buffer[state.start++] = x >> 24
+    state.buffer[state.start++] = (x >> 16) & 0xff
+    state.buffer[state.start++] = (x >> 8) & 0xff
+    state.buffer[state.start++] = x & 0xff
+  } else {
+    // need to use Math here as bitwise ops are 32 bit
+    const exp = Math.floor(Math.log(x) / Math.log(2)) - 32
+    state.buffer[state.start++] = 0xff
+
+    encode(state, exp)
+    const rem = x / Math.pow(2, exp - 11)
+
+    for (let i = 5; i >= 0; i--) {
+      state.buffer[state.start++] = (rem / Math.pow(2, 8 * i)) & 0xff
+    }
+  }
+}
+
+function decode(state) {
+  const max = 251
+
+  if (state.end - state.start < 1) throw new Error('Out of bounds')
+
+  const flag = state.buffer[state.start++]
+
+  if (flag < max) return flag
+
+  if (state.end - state.start < flag - max + 1) {
+    throw new Error('Out of bounds.')
+  }
+
+  if (flag < 252) {
+    return state.buffer[state.start++] + max
+  }
+
+  if (flag < 253) {
+    return (state.buffer[state.start++] << 8) + state.buffer[state.start++] + max
+  }
+
+  if (flag < 254) {
+    return (
+      (state.buffer[state.start++] << 16) +
+      (state.buffer[state.start++] << 8) +
+      state.buffer[state.start++] +
+      max
+    )
+  }
+
+  // << 24 result may be interpreted as negative
+  if (flag < 255) {
+    return (
+      state.buffer[state.start++] * 0x1000000 +
+      (state.buffer[state.start++] << 16) +
+      (state.buffer[state.start++] << 8) +
+      state.buffer[state.start++] +
+      max
+    )
+  }
+
+  const exp = decode(state)
+
+  if (state.end - state.start < 6) throw new Error('Out of bounds')
+
+  let rem = 0
+  for (let i = 5; i >= 0; i--) {
+    rem += state.buffer[state.start++] * Math.pow(2, 8 * i)
+  }
+
+  return rem * Math.pow(2, exp - 11) + max
+}
+
+},{}],17:[function(require,module,exports){
 const b4a = require('b4a')
 
 const { BE } = require('./endian')

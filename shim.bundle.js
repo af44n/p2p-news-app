@@ -96,6 +96,7 @@ async function create_app_vault (vault, app_instance_id, profile_name) {
     vault_put: (key, value) => vault.vault_put(`${app_instance_id}/${key}`, value),
     vault_get: (key) => vault.vault_get(`${app_instance_id}/${key}`),
     vault_del: (key) => vault.vault_del(`${app_instance_id}/${key}`),
+    vault_watch: (key) => vault.get_vault_bee().watch({ gte: `${app_instance_id}/${key}`, lte: `${app_instance_id}/${key}` }),
     // Auto-scoped app operations
     register_app: (config) => vault.register_app(app_instance_id, config),
     get_app: () => vault.get_app(app_instance_id),
@@ -591,6 +592,8 @@ function make_emitter (state = {}) {
 },{"autobase":97,"b4a":115,"hyperbee":363}],4:[function(require,module,exports){
 const Autobase = require('autobase')
 const Hyperdrive = require('hyperdrive')
+const Hyperbee = require('hyperbee')
+const Hyperblobs = require('hyperblobs')
 const b4a = require('b4a')
 const messages = require('autobase/lib/messages')
 
@@ -644,6 +647,7 @@ function create_autodrive (options) {
     put,
     del,
     get,
+    entry,
     list,
     download,
     add_writer,
@@ -663,15 +667,18 @@ function create_autodrive (options) {
   /***************************************
 INTERNAL FUNCTIONS
 ***************************************/
+  // db and blobs are autobase views, so every device gets the same drive key and hashes
   function handle_autobase_open (store) {
-    const drive_store = store.base.store.namespace('autodrive')
-    const drive = new Hyperdrive(drive_store)
+    const db = new Hyperbee(store.get('db'), { keyEncoding: 'utf-8', valueEncoding: 'json', metadata: { contentFeed: null }, extension: false })
+    const blobs = new Hyperblobs(store.get('blobs'))
+    // passed like a checkout, so the drive uses this blobs view instead of looking one up by key
+    const drive = new Hyperdrive(store, { _db: db, _checkout: { blobs, ready: () => {}, getBlobs: () => blobs } })
     return { drive }
   }
 
+  // writes go straight to the drive, a drive.batch() would look up its blobs by key
   async function handle_autobase_apply (nodes, view, base) {
     await view.drive.ready()
-    const batch = view.drive.batch()
 
     for (const node of nodes) {
       const { type, data = {} } = node.value || {}
@@ -680,9 +687,9 @@ INTERNAL FUNCTIONS
       try {
         if (type === 'put') {
           const buffer = b4a.from(data.content, 'base64')
-          await batch.put(data.path, buffer)
+          await view.drive.put(data.path, buffer)
         } else if (type === 'del') {
-          await batch.del(data.path)
+          await view.drive.del(data.path)
         } else if (type === 'add_writer') {
           const key = b4a.from(data.key, 'hex')
           await base.addWriter(key, { indexer: data.is_indexer })
@@ -700,9 +707,6 @@ INTERNAL FUNCTIONS
         console.error('Error applying node:', err)
       }
     }
-
-    await batch.flush()
-    await batch.close()
   }
 
   async function handle_autobase_close (view) {
@@ -754,6 +758,12 @@ INTERNAL FUNCTIONS
     await ready()
     await state.base.update()
     return state.drive.get(path, opts)
+  }
+
+  async function entry (path, opts) {
+    await ready()
+    await state.base.update()
+    return state.drive.entry(path, opts)
   }
 
   async function list (folder = '/', opts = {}) {
@@ -889,7 +899,7 @@ function make_emitter (state = {}) {
   }
 }
 
-},{"autobase":97,"autobase/lib/messages":105,"b4a":115,"hyperdrive":441}],5:[function(require,module,exports){
+},{"autobase":97,"autobase/lib/messages":105,"b4a":115,"hyperbee":363,"hyperblobs":370,"hyperdrive":441}],5:[function(require,module,exports){
 const b4a = require('b4a')
 const sodium = require('sodium')
 const bip39 = require('bip39-mnemonic')
@@ -9703,6 +9713,8 @@ module.exports = class NoiseSecretStream extends Duplex {
     this._keepAliveTimer = null
     this._sendState = null
 
+    this._filterZeroByteMessages = !!opts.filterZeroByteMessages || this.keepAlive > 0
+
     if (opts.autoStart !== false) this.start(rawStream, opts)
 
     // wiggle it to trigger open immediately (TODO add streamx option for this)
@@ -9736,6 +9748,7 @@ module.exports = class NoiseSecretStream extends Duplex {
     this._clearKeepAlive()
 
     this.keepAlive = ms
+    if (this.keepAlive > 0) this._filterZeroByteMessages = true
 
     if (!ms || this.rawStream === null) return
 
@@ -9864,8 +9877,9 @@ module.exports = class NoiseSecretStream extends Duplex {
             this._tmp = 0
             this._state = 1
             const unprocessed = data.byteLength - offset
-            if (unprocessed < this._len && this._utp !== null)
+            if (unprocessed < this._len && this._utp !== null) {
               this._utp.setContentSize(this._len - unprocessed)
+            }
           }
 
           break
@@ -9970,7 +9984,7 @@ module.exports = class NoiseSecretStream extends Duplex {
     }
 
     // If keep alive is selective, eat the empty buffers (ie assume the other side has it enabled also)
-    if (plain.byteLength === 0 && this.keepAlive !== 0) return
+    if (plain.byteLength === 0 && this._filterZeroByteMessages) return
 
     if (this.push(plain) === false) {
       this.rawStream.pause()
@@ -23054,6 +23068,10 @@ function toString(buffer, encoding, start, end) {
   return toBuffer(buffer).toString(encoding, start, end)
 }
 
+function toHex(buffer, start, end) {
+  return toBuffer(buffer).toString('hex', start, end)
+}
+
 function write(buffer, string, offset, length, encoding) {
   return toBuffer(buffer).write(string, offset, length, encoding)
 }
@@ -23143,6 +23161,7 @@ module.exports = {
   swap64,
   toBuffer,
   toString,
+  toHex,
   write,
   readDoubleBE,
   readDoubleLE,
@@ -26245,7 +26264,14 @@ class Watcher extends EventEmitter {
 
     this._closed = false
     this._encoding = encoding
-    this._handle = binding.watcherInit(path, recursive, this, this._onevent, this._onclose)
+    this._handle = binding.watcherInit(this, this._onevent, this._onclose)
+
+    try {
+      binding.watcherStart(this._handle, path, recursive)
+    } catch (err) {
+      this.close()
+      throw err
+    }
 
     if (!persistent) this.unref()
 
@@ -26321,9 +26347,11 @@ class Watcher extends EventEmitter {
       this.emit('error', err)
     } else {
       const path =
-        this._encoding === 'buffer'
-          ? Buffer.from(filename)
-          : Buffer.from(filename).toString(this._encoding)
+        filename === null
+          ? null
+          : this._encoding === 'buffer'
+            ? Buffer.from(filename)
+            : Buffer.from(filename).toString(this._encoding)
 
       if (events & binding.UV_RENAME) {
         this.emit('change', 'rename', path)
@@ -30932,6 +30960,53 @@ const components = new Uint32Array(8)
 // The value used for a component that is not present in the URL.
 const unset = 0xffffffff
 
+// The schemes the parser treats specially. A URL cannot be switched between a
+// special and a non-special scheme, and a backslash only terminates a host for
+// the former.
+const special = new Set(['ftp', 'file', 'http', 'https', 'ws', 'wss'])
+
+// https://url.spec.whatwg.org/#scheme-start-state
+const scheme = /^[a-z][a-z0-9+\-.]*$/
+
+// ASCII tab and newline are removed from input before it is parsed rather than
+// percent-encoded like the other C0 controls.
+const whitespaceAll = /[\t\n\r]/g
+
+// The characters that terminate a host, and so bound the value the host and
+// hostname setters accept.
+const hostEnd = /[/\\?#]/
+const hostEndOpaque = /[/?#]/
+
+// The delimiters that would let a setter's value escape the component it is
+// spliced into. Everything else is left to the reparse, which applies the full
+// percent-encode set for the component. As elsewhere in this package, each set
+// needs two patterns because test() advances a global pattern's lastIndex.
+//
+// Credentials are not run through the parser and so keep their tabs and
+// newlines, percent-encoded, rather than having them stripped.
+const userinfoDelimiter = /[\t\n\r/\\?#@:]/
+const userinfoDelimiterAll = /[\t\n\r/\\?#@:]/g
+
+const pathDelimiter = /[?#]/
+const pathDelimiterAll = /[?#]/g
+
+// A leading or trailing run of C0 control or space in a value that ends up at
+// either end of the href. The parser strips those, but only when parsing a URL
+// as a whole, so a setter has to encode its own.
+const edges = /^[\u0000-\u0020]+|[\u0000-\u0020]+$/g
+
+const escapes = {
+  '\t': '%09',
+  '\n': '%0A',
+  '\r': '%0D',
+  '/': '%2F',
+  '\\': '%5C',
+  ':': '%3A',
+  '?': '%3F',
+  '@': '%40',
+  '#': '%23'
+}
+
 // The characters that pathToFileURL() has to percent-encode itself. A backslash
 // is a path separator on Windows and so is left alone there.
 const reserved = isWindows ? /[%#?\n\r\t]/ : /[%#?\n\r\t\\]/
@@ -30972,7 +31047,9 @@ class URL {
   }
 
   set href(value) {
-    this._update(value)
+    // Unlike every other setter, the href setter reports a parse failure rather
+    // than leaving the URL untouched.
+    this._parse(String(value), null, true)
 
     if (this._params) this._params._parse(this.search)
   }
@@ -30984,7 +31061,27 @@ class URL {
   }
 
   set protocol(value) {
-    this._update(this._replace(value.replace(/:+$/, ''), 0, this._schemeEnd))
+    value = strip(String(value))
+
+    const end = value.indexOf(':')
+
+    if (end !== -1) value = value.slice(0, end)
+
+    value = value.toLowerCase()
+
+    if (!scheme.test(value)) return
+
+    const current = this._slice(0, this._schemeEnd)
+
+    if (special.has(current) !== special.has(value)) return
+
+    if (value === 'file' && (this.username || this.password || this.port)) {
+      return
+    }
+
+    if (current === 'file' && this._hostStart === this._hostEnd) return
+
+    this._update(this._replace(value, 0, this._schemeEnd))
   }
 
   // https://url.spec.whatwg.org/#dom-url-username
@@ -30998,7 +31095,9 @@ class URL {
       return
     }
 
-    if (this.username === '') value += '@'
+    value = encodeUserinfo(String(value))
+
+    if (!hasCredentials(this)) value += '@'
 
     this._update(this._replace(value, this._schemeEnd + 3 /* :// */, this._usernameEnd))
   }
@@ -31014,20 +31113,16 @@ class URL {
       return
     }
 
-    let start = this._usernameEnd + 1 /* : */
+    value = ':' + encodeUserinfo(String(value))
+
     let end = this._hostStart - 1 /* @ */
 
-    if (this.password === '') {
-      value = ':' + value
-      start--
-    }
-
-    if (this.username === '') {
+    if (!hasCredentials(this)) {
       value += '@'
-      end++
+      end = this._usernameEnd
     }
 
-    this._update(this._replace(value, start, end))
+    this._update(this._replace(value, this._usernameEnd, end))
   }
 
   // https://url.spec.whatwg.org/#dom-url-host
@@ -31041,9 +31136,38 @@ class URL {
       return
     }
 
-    this._update(
-      this._replace(value, this._hostStart, value.includes(':') ? this._pathStart : this._hostEnd)
-    )
+    const protocol = this._slice(0, this._schemeEnd)
+
+    value = truncateHost(protocol, String(value))
+
+    // An `@` would make the reparse read the value as credentials rather than
+    // as a host, so it is rejected outright.
+    if (value.includes('@')) return
+
+    const separator = portSeparator(value)
+
+    let end = this._hostEnd
+
+    // A port in the value is parsed separately so that an invalid one leaves
+    // the existing port in place rather than rejecting the host along with it.
+    if (separator !== -1) {
+      // A file URL cannot have a port, so a value carrying one is rejected
+      // rather than split.
+      if (protocol === 'file') return
+
+      const port = parsePort(value.slice(separator + 1))
+
+      value = value.slice(0, separator)
+
+      if (port !== null) {
+        value += port
+        end = this._pathStart
+      }
+    }
+
+    if (value === '' && cannotHaveEmptyHost(protocol)) return
+
+    this._update(this._replace(value, this._hostStart, end))
   }
 
   // https://url.spec.whatwg.org/#dom-url-hostname
@@ -31056,6 +31180,17 @@ class URL {
     if (hasOpaquePath(this)) {
       return
     }
+
+    const protocol = this._slice(0, this._schemeEnd)
+
+    value = truncateHost(protocol, String(value))
+
+    // A port cannot be set through this setter, and a value that carries one is
+    // rejected outright rather than truncated. An `@` would make the reparse
+    // read the value as credentials rather than as a host.
+    if (value.includes('@') || portSeparator(value) !== -1) return
+
+    if (value === '' && cannotHaveEmptyHost(protocol)) return
 
     this._update(this._replace(value, this._hostStart, this._hostEnd))
   }
@@ -31071,14 +31206,15 @@ class URL {
       return
     }
 
-    let start = this._hostEnd + 1 /* : */
+    value = strip(String(value))
 
-    if (this.port === '') {
-      value = ':' + value
-      start--
+    if (value !== '') {
+      value = parsePort(value)
+
+      if (value === null) return
     }
 
-    this._update(this._replace(value, start, this._pathStart))
+    this._update(this._replace(value, this._hostEnd, this._pathStart))
   }
 
   // https://url.spec.whatwg.org/#dom-url-pathname
@@ -31092,7 +31228,11 @@ class URL {
       return
     }
 
-    if (value[0] !== '/' && value[0] !== '\\') {
+    value = encodePath(encodeEdges(String(value)))
+
+    // An empty path is left alone, as only a special scheme is required to have
+    // one and the reparse inserts it there.
+    if (value !== '' && value[0] !== '/' && value[0] !== '\\') {
       value = '/' + value
     }
 
@@ -31106,13 +31246,17 @@ class URL {
   }
 
   set search(value) {
-    if (value && value[0] !== '?') value = '?' + value
+    value = String(value)
+
+    if (value !== '') {
+      if (value[0] === '?') value = value.slice(1)
+
+      value = '?' + encodeQuery(encodeEdges(value))
+    }
 
     this._update(
       this._replace(value, this._queryStart - 1 /* ? */, this._fragmentStart - 1 /* # */)
     )
-
-    if (this._params) this._params._parse(this.search)
   }
 
   // https://url.spec.whatwg.org/#dom-url-searchparams
@@ -31132,7 +31276,15 @@ class URL {
   }
 
   set hash(value) {
-    if (value && value[0] !== '#') value = '#' + value
+    value = String(value)
+
+    // The fragment runs to the end of the URL, so nothing in it can escape into
+    // another component and no delimiter needs encoding here.
+    if (value !== '') {
+      if (value[0] === '#') value = value.slice(1)
+
+      value = '#' + encodeEdges(value)
+    }
 
     this._update(this._replace(value, this._fragmentStart - 1 /* # */))
   }
@@ -31177,7 +31329,7 @@ class URL {
     try {
       href = binding.parse(input, base || null, components, shouldThrow)
     } catch (err) {
-      if (err instanceof TypeError) throw err
+      if (err instanceof TypeError || err.code !== undefined) throw err
 
       throw errors.INVALID_URL(`Invalid URL '${input}'`, input)
     }
@@ -31205,7 +31357,11 @@ class URL {
       this._parse(input, null, true)
     } catch (err) {
       if (err instanceof TypeError) throw err
+
+      return
     }
+
+    if (this._params) this._params._parse(this.search)
   }
 }
 
@@ -31219,6 +31375,93 @@ function hasOpaquePath(url) {
 // https://url.spec.whatwg.org/#cannot-have-a-username-password-port
 function cannotHaveCredentialsOrPort(url) {
   return url.hostname === '' || url.protocol === 'file:'
+}
+
+// Whether the URL carries a userinfo section, and so an `@` before its host.
+function hasCredentials(url) {
+  return url._hostStart !== url._usernameEnd
+}
+
+// Almost no input contains any of these, so it is worth ruling all three out
+// before rewriting anything.
+function strip(value) {
+  if (value.indexOf('\t') === -1 && value.indexOf('\n') === -1 && value.indexOf('\r') === -1) {
+    return value
+  }
+
+  return value.replace(whitespaceAll, '')
+}
+
+// https://url.spec.whatwg.org/#host-state
+//
+// Host parsing stops at the first character that starts another component, so
+// anything from there on is dropped rather than spliced into the host.
+function truncateHost(protocol, value) {
+  const end = value.search(special.has(protocol) ? hostEnd : hostEndOpaque)
+
+  return end === -1 ? value : value.slice(0, end)
+}
+
+// Only a special scheme other than file has to have a host.
+function cannotHaveEmptyHost(protocol) {
+  return protocol !== 'file' && special.has(protocol)
+}
+
+// The index of the colon that separates a host from its port, disregarding the
+// colons of an IPv6 address, or -1 if the host carries no port.
+function portSeparator(host) {
+  return host.indexOf(':', host[0] === '[' ? host.indexOf(']') : 0)
+}
+
+// https://url.spec.whatwg.org/#port-state
+//
+// Parsing stops at the first character that is not a digit, so a value with no
+// leading digits, or one that overflows, leaves the port as it was.
+function parsePort(value) {
+  value = /^\d*/.exec(value)[0]
+
+  if (value === '' || Number(value) > 65535) return null
+
+  return ':' + value
+}
+
+function encodeUserinfo(value) {
+  if (!userinfoDelimiter.test(value)) return value
+
+  return value.replace(userinfoDelimiterAll, (match) => escapes[match])
+}
+
+function encodePath(value) {
+  if (!pathDelimiter.test(value)) return value
+
+  return value.replace(pathDelimiterAll, (match) => escapes[match])
+}
+
+function encodeQuery(value) {
+  if (value.indexOf('#') === -1) return value
+
+  return value.replaceAll('#', '%23')
+}
+
+// Percent-encodes a leading or trailing run of C0 control or space, which the
+// parser would otherwise strip from a value that lands at either end of the
+// href. Every component that can end a URL encodes them anyway, so this only
+// brings the encoding forward.
+function encodeEdges(value) {
+  const len = value.length
+
+  if (len === 0) return value
+  if (value.charCodeAt(0) > 0x20 && value.charCodeAt(len - 1) > 0x20) return value
+
+  return value.replace(edges, (match) => {
+    let encoded = ''
+
+    for (let i = 0, n = match.length; i < n; i++) {
+      encoded += '%' + match.charCodeAt(i).toString(16).padStart(2, '0').toUpperCase()
+    }
+
+    return encoded
+  })
 }
 
 exports.URL = URL
@@ -31413,9 +31656,11 @@ module.exports = class URLError extends Error {
 },{}],160:[function(require,module,exports){
 const kind = Symbol.for('bare.url.search-params.kind')
 
-class URLSearchParams {
-  static _urls = new WeakMap()
+// The URL each instance writes back to, if any. Kept module private so that the
+// setter it drives cannot be pointed at an arbitrary object.
+const urls = new WeakMap()
 
+class URLSearchParams {
   static get [kind]() {
     return 0 // Compatibility version
   }
@@ -31424,7 +31669,7 @@ class URLSearchParams {
   constructor(init, url = null) {
     this._params = null
 
-    if (url) URLSearchParams._urls.set(this, url)
+    if (url) urls.set(this, url)
 
     if (typeof init === 'string') {
       this._parse(init)
@@ -31553,7 +31798,7 @@ class URLSearchParams {
 
   // https://url.spec.whatwg.org/#concept-urlsearchparams-update
   _update() {
-    const url = URLSearchParams._urls.get(this)
+    const url = urls.get(this)
 
     if (url === undefined) return
 
@@ -31647,8 +31892,11 @@ const escapes = {
   '~': '%7E'
 }
 
-// A surrogate that is not part of a pair, and so does not encode a scalar value.
-const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
+// A surrogate pair, or a surrogate that is not part of one and so encodes no
+// scalar value. Pairs are matched first so that only the capture group can hold
+// a lone surrogate; a lookbehind would say this more directly but isn't
+// supported by every engine.
+const lone = /[\ud800-\udbff][\udc00-\udfff]|([\ud800-\udbff]|[\udc00-\udfff])/g
 
 function encode(component) {
   if (unencoded.test(component)) return component
@@ -31662,7 +31910,9 @@ function encode(component) {
   } catch {
     // encodeURIComponent() rejects lone surrogates, whereas the UTF-8 encoder the
     // serializer is defined in terms of replaces them with U+FFFD.
-    encoded = encodeURIComponent(component.replace(lone, '\ufffd'))
+    encoded = encodeURIComponent(
+      component.replace(lone, (match, single) => (single === undefined ? match : '\ufffd'))
+    )
   }
 
   if (encoded.includes('%20')) encoded = encoded.replaceAll('%20', '+')
@@ -33609,8 +33859,7 @@ module.exports = {
 }
 
 },{"bogon":191,"compact-encoding":186}],185:[function(require,module,exports){
-const LE = (exports.LE =
-  new Uint8Array(new Uint16Array([0xff]).buffer)[0] === 0xff)
+const LE = (exports.LE = new Uint8Array(new Uint16Array([0xff]).buffer)[0] === 0xff)
 
 exports.BE = !LE
 
@@ -33793,9 +34042,7 @@ const uint56 = (exports.uint56 = {
   },
   decode(state) {
     if (state.end - state.start < 7) throw new Error('Out of bounds')
-    return validateSafeUint(
-      uint24.decode(state) + 0x1000000 * uint32.decode(state)
-    )
+    return validateSafeUint(uint24.decode(state) + 0x1000000 * uint32.decode(state))
   }
 })
 
@@ -33811,9 +34058,7 @@ const uint64 = (exports.uint64 = {
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    return validateSafeUint(
-      uint32.decode(state) + 0x100000000 * uint32.decode(state)
-    )
+    return validateSafeUint(uint32.decode(state) + 0x100000000 * uint32.decode(state))
   }
 })
 
@@ -33829,9 +34074,7 @@ exports.uint64be = {
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    return validateSafeUint(
-      0x100000000 * uint32be.decode(state) + uint32be.decode(state)
-    )
+    return validateSafeUint(0x100000000 * uint32be.decode(state) + uint32be.decode(state))
   }
 }
 
@@ -33845,27 +34088,32 @@ exports.int48 = zigZagInt(uint48)
 exports.int56 = zigZagInt(uint56)
 exports.int64 = zigZagInt(uint64)
 
+// Constructing a DataView costs more than the read or write it is used for, so
+// keep one per buffer.
+const views = new WeakMap()
+
+function viewOf(buffer) {
+  let view = views.get(buffer)
+
+  if (view === undefined) {
+    view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+    views.set(buffer, view)
+  }
+
+  return view
+}
+
 const biguint64 = (exports.biguint64 = {
   preencode(state, n) {
     state.end += 8
   },
   encode(state, n) {
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    view.setBigUint64(0, n, true) // little endian
+    viewOf(state.buffer).setBigUint64(state.start, n, true) // little endian
     state.start += 8
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    const n = view.getBigUint64(0, true) // little endian
+    const n = viewOf(state.buffer).getBigUint64(state.start, true) // little endian
     state.start += 8
     return n
   }
@@ -33884,12 +34132,8 @@ const biguint = (exports.biguint = {
     let len = 0
     for (let m = n; m; m = m >> 64n) len++
     uint.encode(state, len)
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8 * len
-    )
-    for (let m = n, i = 0; m; m = m >> 64n, i += 8) {
+    const view = viewOf(state.buffer)
+    for (let m = n, i = state.start; m; m = m >> 64n, i += 8) {
       view.setBigUint64(i, BigInt.asUintN(64, m), true) // little endian
     }
     state.start += 8 * len
@@ -33897,14 +34141,11 @@ const biguint = (exports.biguint = {
   decode(state) {
     const len = uint.decode(state)
     if (state.end - state.start < 8 * len) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8 * len
-    )
+    const view = viewOf(state.buffer)
     let n = 0n
-    for (let i = len - 1; i >= 0; i--)
-      n = (n << 64n) + view.getBigUint64(i * 8, true) // little endian
+    for (let i = len - 1; i >= 0; i--) {
+      n = (n << 64n) + view.getBigUint64(state.start + i * 8, true) // little endian
+    }
     state.start += 8 * len
     return n
   }
@@ -33919,22 +34160,12 @@ exports.float32 = {
     state.end += 4
   },
   encode(state, n) {
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      4
-    )
-    view.setFloat32(0, n, true) // little endian
+    viewOf(state.buffer).setFloat32(state.start, n, true) // little endian
     state.start += 4
   },
   decode(state) {
     if (state.end - state.start < 4) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      4
-    )
-    const float = view.getFloat32(0, true) // little endian
+    const float = viewOf(state.buffer).getFloat32(state.start, true) // little endian
     state.start += 4
     return float
   }
@@ -33945,22 +34176,12 @@ exports.float64 = {
     state.end += 8
   },
   encode(state, n) {
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    view.setFloat64(0, n, true) // little endian
+    viewOf(state.buffer).setFloat64(state.start, n, true) // little endian
     state.start += 8
   },
   decode(state) {
     if (state.end - state.start < 8) throw new Error('Out of bounds')
-    const view = new DataView(
-      state.buffer.buffer,
-      state.start + state.buffer.byteOffset,
-      8
-    )
-    const float = view.getFloat64(0, true) // little endian
+    const float = viewOf(state.buffer).getFloat64(state.start, true) // little endian
     state.start += 8
     return float
   }
@@ -34024,6 +34245,7 @@ exports.arraybuffer = {
   },
   decode(state) {
     const len = uint.decode(state)
+    if (state.end - state.start < len) throw new Error('Out of bounds')
 
     const b = new ArrayBuffer(len)
     const view = new Uint8Array(b)
@@ -34031,6 +34253,35 @@ exports.arraybuffer = {
     view.set(state.buffer.subarray(state.start, (state.start += len)))
 
     return b
+  }
+}
+
+exports.bitarray = {
+  preencode(state, m) {
+    uint.preencode(state, m.length)
+    state.end += Math.ceil(m.length / 8)
+  },
+  encode(state, m) {
+    uint.encode(state, m.length)
+    for (let i = 0; i < m.length; i += 8) {
+      let byte = 0
+      for (let j = 0; j < 8 && i + j < m.length; j++) {
+        if (m[i + j]) byte |= 1 << j
+      }
+      state.buffer[state.start++] = byte
+    }
+  },
+  decode(state) {
+    const n = uint.decode(state)
+    if (state.end - state.start < Math.ceil(n / 8)) throw new Error('Out of bounds')
+    const m = new Array(n)
+    for (let i = 0; i < n; i += 8) {
+      const byte = state.buffer[state.start++]
+      for (let j = 0; j < 8 && i + j < n; j++) {
+        m[i + j] = (byte & (1 << j)) !== 0
+      }
+    }
+    return m
   }
 }
 
@@ -34096,12 +34347,7 @@ function string(encoding) {
     decode(state) {
       const len = uint.decode(state)
       if (state.end - state.start < len) throw new Error('Out of bounds')
-      return b4a.toString(
-        state.buffer,
-        encoding,
-        state.start,
-        (state.start += len)
-      )
+      return b4a.toString(state.buffer, encoding, state.start, (state.start += len))
     },
     fixed(n) {
       return {
@@ -34114,19 +34360,132 @@ function string(encoding) {
         },
         decode(state) {
           if (state.end - state.start < n) throw new Error('Out of bounds')
-          return b4a.toString(
-            state.buffer,
-            encoding,
-            state.start,
-            (state.start += n)
-          )
+          return b4a.toString(state.buffer, encoding, state.start, (state.start += n))
         }
       }
     }
   }
 }
 
-const utf8 = (exports.string = exports.utf8 = string('utf-8'))
+// The native codec costs the same for a two character string as for a sixty
+// character one, so below these lengths a hand-rolled ASCII loop wins.
+const ASCII_ENCODE_MAX = 64
+const ASCII_DECODE_MAX = 56
+
+const fromCharCode = String.fromCharCode
+
+// Returns -1 if the string is not ASCII, in which case its UTF-8 length has to
+// be measured by the native codec.
+function asciiLength(s) {
+  const n = s.length
+
+  if (n > ASCII_ENCODE_MAX) return -1
+
+  for (let i = 0; i < n; i++) {
+    if (s.charCodeAt(i) > 0x7f) return -1
+  }
+
+  return n
+}
+
+// Returns false, leaving the state untouched, if the string is not ASCII. The
+// string is checked while being written, which saves a pass over it compared
+// to measuring it first.
+function asciiEncode(state, s) {
+  const len = s.length
+
+  if (len > ASCII_ENCODE_MAX) return false
+
+  const start = state.start
+
+  uint.encode(state, len)
+
+  const buffer = state.buffer
+  const offset = state.start
+
+  for (let i = 0; i < len; i++) {
+    const c = s.charCodeAt(i)
+
+    if (c > 0x7f) {
+      state.start = start
+      return false
+    }
+
+    buffer[offset + i] = c
+  }
+
+  state.start = offset + len
+  return true
+}
+
+// Returns null if the range is not ASCII, in which case it has to be decoded by
+// the native codec. Eight code units per call amortises the call overhead of
+// `String.fromCharCode` without growing the argument list unreasonably.
+function asciiDecode(buffer, start, end) {
+  let s = ''
+  let i = start
+
+  for (; i + 8 <= end; i += 8) {
+    const c0 = buffer[i]
+    const c1 = buffer[i + 1]
+    const c2 = buffer[i + 2]
+    const c3 = buffer[i + 3]
+    const c4 = buffer[i + 4]
+    const c5 = buffer[i + 5]
+    const c6 = buffer[i + 6]
+    const c7 = buffer[i + 7]
+
+    if ((c0 | c1 | c2 | c3 | c4 | c5 | c6 | c7) > 0x7f) return null
+
+    s += fromCharCode(c0, c1, c2, c3, c4, c5, c6, c7)
+  }
+
+  for (; i < end; i++) {
+    const c = buffer[i]
+
+    if (c > 0x7f) return null
+
+    s += fromCharCode(c)
+  }
+
+  return s
+}
+
+const nativeUTF8 = string('utf-8')
+
+const utf8 = {
+  ...nativeUTF8,
+
+  preencode(state, s) {
+    const len = asciiLength(s)
+
+    if (len === -1) return nativeUTF8.preencode(state, s)
+
+    uint.preencode(state, len)
+    state.end += len
+  },
+  encode(state, s) {
+    if (!asciiEncode(state, s)) nativeUTF8.encode(state, s)
+  },
+  decode(state) {
+    const len = uint.decode(state)
+    if (state.end - state.start < len) throw new Error('Out of bounds')
+
+    const buffer = state.buffer
+    const start = state.start
+    const end = (state.start += len)
+
+    if (len <= ASCII_DECODE_MAX) {
+      const s = asciiDecode(buffer, start, end)
+
+      if (s !== null) return s
+    }
+
+    return b4a.toString(buffer, 'utf-8', start, end)
+  }
+}
+
+exports.string = exports.utf8 = utf8
 exports.ascii = string('ascii')
 exports.hex = string('hex')
 exports.base64 = string('base64')
@@ -34162,6 +34521,9 @@ const fixed = (exports.fixed = function fixed(n) {
   }
 })
 
+exports.fixed8 = fixed(8)
+exports.fixed16 = fixed(16)
+exports.fixed24 = fixed(24)
 exports.fixed32 = fixed(32)
 exports.fixed64 = fixed(64)
 
@@ -34203,6 +34565,7 @@ exports.frame = function frame(enc) {
     decode(state) {
       const end = state.end
       const len = uint.decode(state)
+      if (state.start + len > end) throw new Error('Out of bounds')
       state.end = state.start + len
       const m = enc.decode(state)
       state.start = state.end
@@ -34381,10 +34744,7 @@ const ipv4 = (exports.ipv4 = {
       let n = 0
       let c
 
-      while (
-        i < string.length &&
-        (c = string.charCodeAt(i++)) !== /* . */ 0x2e
-      ) {
+      while (i < string.length && (c = string.charCodeAt(i++)) !== /* . */ 0x2e) {
         n = n * 10 + (c - /* 0 */ 0x30)
       }
 
@@ -34424,10 +34784,7 @@ const ipv6 = (exports.ipv6 = {
       let n = 0
       let c
 
-      while (
-        i < string.length &&
-        (c = string.charCodeAt(i++)) !== /* : */ 0x3a
-      ) {
+      while (i < string.length && (c = string.charCodeAt(i++)) !== /* : */ 0x3a) {
         if (c >= 0x30 && c <= 0x39) n = n * 0x10 + (c - /* 0 */ 0x30)
         else if (c >= 0x41 && c <= 0x46) n = n * 0x10 + (c - /* A */ 0x41 + 10)
         else if (c >= 0x61 && c <= 0x66) n = n * 0x10 + (c - /* a */ 0x61 + 10)
@@ -34444,9 +34801,7 @@ const ipv6 = (exports.ipv6 = {
 
     if (split !== null) {
       const offset = end - state.start
-      state.buffer
-        .copyWithin(split + offset, split)
-        .fill(0, split, split + offset)
+      state.buffer.copyWithin(split + offset, split).fill(0, split, split + offset)
     }
 
     state.start = end
@@ -34454,45 +34809,21 @@ const ipv6 = (exports.ipv6 = {
   decode(state) {
     if (state.end - state.start < 16) throw new Error('Out of bounds')
     return (
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16) +
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16) +
       ':' +
-      (
-        state.buffer[state.start++] * 256 +
-        state.buffer[state.start++]
-      ).toString(16)
+      (state.buffer[state.start++] * 256 + state.buffer[state.start++]).toString(16)
     )
   }
 })
@@ -34737,15 +35068,11 @@ function validateInt(n) {
 // Kept out here, the message costs nothing until it is actually thrown.
 
 function outsideUintRange() {
-  return new Error(
-    `uint must be between 0 and ${Number.MAX_SAFE_INTEGER}, use biguint`
-  )
+  return new Error(`uint must be between 0 and ${Number.MAX_SAFE_INTEGER}, use biguint`)
 }
 
 function outsideIntRange() {
-  return new Error(
-    `int must be between ${MIN_SAFE_INT} and ${MAX_SAFE_INT}, use bigint`
-  )
+  return new Error(`int must be between ${MIN_SAFE_INT} and ${MAX_SAFE_INT}, use bigint`)
 }
 
 },{"./endian":185,"./lexint":187,"./raw":188,"b4a":115}],187:[function(require,module,exports){
@@ -34830,9 +35157,7 @@ function decode(state) {
   }
 
   if (flag < 253) {
-    return (
-      (state.buffer[state.start++] << 8) + state.buffer[state.start++] + max
-    )
+    return (state.buffer[state.start++] << 8) + state.buffer[state.start++] + max
   }
 
   if (flag < 254) {
@@ -44001,8 +44326,12 @@ arguments[4][187][0].apply(exports,arguments)
 },{"dup":187}],245:[function(require,module,exports){
 arguments[4][188][0].apply(exports,arguments)
 },{"./endian":242,"b4a":115,"dup":188}],246:[function(require,module,exports){
-arguments[4][185][0].apply(exports,arguments)
-},{"dup":185}],247:[function(require,module,exports){
+const LE = (exports.LE =
+  new Uint8Array(new Uint16Array([0xff]).buffer)[0] === 0xff)
+
+exports.BE = !LE
+
+},{}],247:[function(require,module,exports){
 const b4a = require('b4a')
 
 const { BE } = require('./endian')
@@ -45044,8 +45373,125 @@ function validateUint(n) {
 }
 
 },{"./endian":246,"./lexint":248,"./raw":249,"b4a":115}],248:[function(require,module,exports){
-arguments[4][187][0].apply(exports,arguments)
-},{"dup":187}],249:[function(require,module,exports){
+module.exports = {
+  preencode,
+  encode,
+  decode
+}
+
+function preencode(state, num) {
+  if (num < 251) {
+    state.end++
+  } else if (num < 256) {
+    state.end += 2
+  } else if (num < 0x10000) {
+    state.end += 3
+  } else if (num < 0x1000000) {
+    state.end += 4
+  } else if (num < 0x100000000) {
+    state.end += 5
+  } else {
+    state.end++
+    const exp = Math.floor(Math.log(num) / Math.log(2)) - 32
+    preencode(state, exp)
+    state.end += 6
+  }
+}
+
+function encode(state, num) {
+  const max = 251
+  const x = num - max
+
+  if (num < max) {
+    state.buffer[state.start++] = num
+  } else if (num < 256) {
+    state.buffer[state.start++] = max
+    state.buffer[state.start++] = x
+  } else if (num < 0x10000) {
+    state.buffer[state.start++] = max + 1
+    state.buffer[state.start++] = (x >> 8) & 0xff
+    state.buffer[state.start++] = x & 0xff
+  } else if (num < 0x1000000) {
+    state.buffer[state.start++] = max + 2
+    state.buffer[state.start++] = x >> 16
+    state.buffer[state.start++] = (x >> 8) & 0xff
+    state.buffer[state.start++] = x & 0xff
+  } else if (num < 0x100000000) {
+    state.buffer[state.start++] = max + 3
+    state.buffer[state.start++] = x >> 24
+    state.buffer[state.start++] = (x >> 16) & 0xff
+    state.buffer[state.start++] = (x >> 8) & 0xff
+    state.buffer[state.start++] = x & 0xff
+  } else {
+    // need to use Math here as bitwise ops are 32 bit
+    const exp = Math.floor(Math.log(x) / Math.log(2)) - 32
+    state.buffer[state.start++] = 0xff
+
+    encode(state, exp)
+    const rem = x / Math.pow(2, exp - 11)
+
+    for (let i = 5; i >= 0; i--) {
+      state.buffer[state.start++] = (rem / Math.pow(2, 8 * i)) & 0xff
+    }
+  }
+}
+
+function decode(state) {
+  const max = 251
+
+  if (state.end - state.start < 1) throw new Error('Out of bounds')
+
+  const flag = state.buffer[state.start++]
+
+  if (flag < max) return flag
+
+  if (state.end - state.start < flag - max + 1) {
+    throw new Error('Out of bounds.')
+  }
+
+  if (flag < 252) {
+    return state.buffer[state.start++] + max
+  }
+
+  if (flag < 253) {
+    return (
+      (state.buffer[state.start++] << 8) + state.buffer[state.start++] + max
+    )
+  }
+
+  if (flag < 254) {
+    return (
+      (state.buffer[state.start++] << 16) +
+      (state.buffer[state.start++] << 8) +
+      state.buffer[state.start++] +
+      max
+    )
+  }
+
+  // << 24 result may be interpreted as negative
+  if (flag < 255) {
+    return (
+      state.buffer[state.start++] * 0x1000000 +
+      (state.buffer[state.start++] << 16) +
+      (state.buffer[state.start++] << 8) +
+      state.buffer[state.start++] +
+      max
+    )
+  }
+
+  const exp = decode(state)
+
+  if (state.end - state.start < 6) throw new Error('Out of bounds')
+
+  let rem = 0
+  for (let i = 5; i >= 0; i--) {
+    rem += state.buffer[state.start++] * Math.pow(2, 8 * i)
+  }
+
+  return rem * Math.pow(2, exp - 11) + max
+}
+
+},{}],249:[function(require,module,exports){
 const b4a = require('b4a')
 
 const { BE } = require('./endian')
@@ -71632,6 +72078,7 @@ module.exports = class Hyperswarm extends EventEmitter {
     this._clientConnections = 0
     this._serverConnections = 0
     this._firewall = firewall
+    this._online = true
 
     this.dht.on('network-change', this._handleNetworkChange.bind(this))
     this.dht.on('network-update', this._handleNetworkUpdate.bind(this))
@@ -71991,7 +72438,10 @@ module.exports = class Hyperswarm extends EventEmitter {
   }
 
   async _handleNetworkUpdate() {
-    if (!this.online) return
+    // Rising edge for being online
+    const networkCameOnline = this.dht.online && !this._online
+    this._online = this.dht.online
+    if (!networkCameOnline) return
     this._handleNetworkChange()
   }
 
@@ -72205,6 +72655,7 @@ function shouldForceRelaying(code) {
   return (
     code === 'HOLEPUNCH_ABORTED' ||
     code === 'HOLEPUNCH_DOUBLE_RANDOMIZED_NATS' ||
+    code === 'CANNOT_HOLEPUNCH' ||
     code === 'REMOTE_NOT_HOLEPUNCHABLE'
   )
 }
@@ -75959,7 +76410,7 @@ class Channel {
     this._extensions = null
 
     this._decBound = this._dec.bind(this)
-    this._decAndDestroyBound = this._decAndDestroy.bind(this)
+    this._decAndMaybeDestroyBound = this._decAndMaybeDestroy.bind(this)
 
     this._openedPromise = null
     this._openedResolve = null
@@ -76030,8 +76481,9 @@ class Channel {
     if (--this._active === 0 && this.closed === true) this._destroy()
   }
 
-  _decAndDestroy(err) {
+  _decAndMaybeDestroy(err) {
     this._dec()
+    if (this.closed) return this._mux._warn(err)
     this._mux._safeDestroy(err)
   }
 
@@ -76094,7 +76546,7 @@ class Channel {
   _track(p) {
     if (isPromise(p) === true) {
       this._active++
-      return p.then(this._decBound, this._decAndDestroyBound)
+      return p.then(this._decBound, this._decAndMaybeDestroyBound)
     }
 
     return null
@@ -76562,7 +77014,7 @@ module.exports = class Protomux {
         remoteId = c.uint.decode(state)
         continue
       }
-      state.end = state.start + len
+      state.end = Math.min(state.start + len, end)
       // if batch contains more than one message, cork it so we reply back with a batch
       if (end !== state.end && waiting === null) {
         waiting = []
@@ -76728,6 +77180,11 @@ module.exports = class Protomux {
     safetyCatch(err)
     this._destroying = true
     this.stream.destroy(err)
+  }
+
+  _warn(err) {
+    safetyCatch(err)
+    this.stream.emit('warning', err)
   }
 
   _shutdown() {
@@ -91576,7 +92033,7 @@ if (hasToStringTag && gOPD && getProto) {
 		var arr = new g[typedArray]();
 		var fn = arr.slice || arr.set;
 		if (fn) {
-			var bound = /** @type {BoundSlice | BoundSet} */ (
+			var bound = /** @type {typeof BoundSlice | typeof BoundSet} */ (
 				// @ts-expect-error TODO FIXME
 				callBind(fn)
 			);
@@ -91631,11 +92088,8 @@ function isTATag(tag) {
 	return $indexOf(typedArrays, tag) > -1;
 }
 
-/**
- * @type {import('.')}
- * @param {unknown} value
- */
-module.exports = function whichTypedArray(value) {
+/** @type {(value: unknown) => ReturnType<typeof import('.')>} */
+function whichTypedArray(value) {
 	if (!value || typeof value !== 'object') {
 		return false;
 	}
@@ -91652,7 +92106,9 @@ module.exports = function whichTypedArray(value) {
 	}
 	if (!gOPD) { return null; } // unknown engine
 	return tryTypedArrays(value);
-};
+}
+
+module.exports = whichTypedArray;
 
 }).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"available-typed-arrays":114,"call-bind":236,"call-bound":237,"for-each":332,"get-proto":338,"gopd":341,"has-tostringtag/shams":345}],686:[function(require,module,exports){
