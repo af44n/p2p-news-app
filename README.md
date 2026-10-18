@@ -15,7 +15,7 @@ We've added some cool stuff recently:
 - **Device Management:** You can now give devices petnames, kick them out safely, and see which ones are dead.
 - **Top Bar:** A sticky top bar so you always know who you're logged in as.
 
-For Web peers just go to my deployed [github_page](https://af44n.github.io/p2p-news-app/) and the hosted relay would work and let you join.
+For Web peers there is my deployed [github_page](https://af44n.github.io/p2p-news-app/). The hosted relay it uses by default is down right now (and its url has no `wss://`), so add a running relay in the Relays tab of the system bar and set it as default, or run everything locally like below.
 
 But if you want to try it manually:
 
@@ -33,7 +33,7 @@ Clone the repository:
 e.g: `npm run relay`                                                  
 ```
 > p2p-news-app@0.0.1 relay
-> node src/node_modules/relay/index.js
+> node lib/node_modules/relay/index.js
 
 Relay running on ws://localhost:8080
 
@@ -50,7 +50,7 @@ e.g: `npm run build && npm run web`
 [0003] 2752ms     2.3MB (browserify)
 
 ```
-Now open the webpage, input your username to join the topic, have your friends join aswell and when two peers connect, you can subsribe to each other and exchange blogs, fully decentralized. 
+Now open the webpage, click Seed and enter your name (or Pair with an invite code from your other device), launch the app, have your friends join aswell and when two peers connect, you can subsribe to each other and exchange blogs, fully decentralized. 
 
 **Screenshot**
 
@@ -60,21 +60,16 @@ Now open the webpage, input your username to join the topic, have your friends j
 
 ## Run native peer
 
-e.g: `npx native-peer --name somename`   
+e.g: `npm run cli` (runs `bare lib/run.js`, its data is kept in the folder you run it in)
 
 ```
- npx native-peer --name afaan                                       [15:56:26]
-[peer-afaan] start
-[peer-afaan] { peerkey: '6e2b26fabdf50698182e2339925e696e1e6166980fa0bc6ad4103eeb7a555292' }
-[peer-afaan] ✅ Successfully created a new core with the key
-[peer-afaan] { corekey: '748b6027047f111ff07d403a0746e43f34d00df061564e4ad8f6af74d897b222' }
-[peer-afaan] Joining swarm
-Swarm Joined, looking for peers
-Native peer CLI started successfully.
-
-
+=== System Authentication ===
+1. Seed   (create new account)
+2. Pair   (join with invite code)
+3. Load   (restore from mnemonic)
+4. Reset All Data
 ```
-The native peer will also join the same topic, and you will see diffrent option to subsribe to other online peers (web or CLI) and append data or replicate.
+After Seed (or Pair) you get the system menu (launch app, devices, invite code, vault log, reset). The news app on the cli joins the same topic as the web peers, so you can post, see other peers blogs (web or CLI), subscribe to them and see your profile. The screenshot below is from an older version of the cli.
 
 **Screenshot**
 

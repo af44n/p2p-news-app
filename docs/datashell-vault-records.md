@@ -22,7 +22,7 @@ await vault.vault_put('packs/flamingo-node', {
 })
 ```
 
-that's basically `pkgs.json`, just one record per name. listing is a read stream over `packs/`, same as `list_apps()` does for `apps/`. since the packs to be autodrives, `link` might change, but the record itself stays the same.
+that's basically `pkgs.json`, just one record per name. listing is a read stream over `packs/`, same as `list_apps()` does for `apps/`. since the packs to be autodisks, `link` might change, but the record itself stays the same.
 
 ## bots
 
@@ -74,7 +74,7 @@ so the worst case is the bot being stopped for a while, never two copies running
 
 ### writing to the bot drive
 
-as the bot drive will be an autodrive, A also has to add B as a writer before the hand off and remove itself after (`add_writer()` / `remove_writer()` in `datastructure-manager`, like `remove_device()` does for app structures).
+as the bot drive will be an autodisk, A also has to add B as a writer before the hand off and remove itself after (`add_writer()` / `remove_writer()` in `datastructure-manager`, like `remove_device()` does for app structures).
 
 ##  if owner is gone
 

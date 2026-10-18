@@ -1,5 +1,7 @@
 # Autodrive Identity System
 
+> This is the design idea from may, most of it was not built like this. What the code does today, the drive is called `autodisk` (`lib/node_modules/autodisk`), pairing uses `blind-pairing` with an invite code and a 6 character verification code (see `lib/node_modules/pairing-manager`) and only pairs the vault, there is no keet-identity-key, no attestation and no secretstream invite. Every device makes its own 24 word seed phrase and keeps it as plain text (local storage / a `.vault-seedphrase` file), it is that devices network key, not a recovery phrase yet, tho we're workign towards that.  The module readmes in `lib/node_modules/*/README.md` describe the current code.
+
 ## Overview
 
 This doc outlines the identity and multi-writer setup for our P2P news app using Autodrive (Autobase + Hyperdrive). It enables secure collaboration across devices, allowing multiple trusted writers to share a data store with cryptographic access control. The identity system balances security, usability, and browser compatibility.
@@ -8,7 +10,7 @@ This doc outlines the identity and multi-writer setup for our P2P news app using
 
 ### Autodrive Implementation
 
-Our custom [Autodrive](https://github.com/trulynotafan/p2p-news-app/tree/main/src/node_modules/autodrive) implementation uses:
+Our custom [Autodrive](https://github.com/af44n/p2p-news-app/tree/main/lib/node_modules/autodisk) implementation uses:
 - **[Autobase](https://github.com/holepunchto/autobase/)**: Multi-writer append-only log for coordination
 - **[Hyperdrive](https://github.com/holepunchto/hyperdrive)**: File system interface for content storage
 - **[Keet Identity Key](https://github.com/holepunchto/keet-identity-key)**: Cryptographic identity management for device authentication
@@ -32,7 +34,7 @@ drive.add_writer(key) // <== this the local key aka the writer key of the person
 drive.remove_writer(key) // to remove some writers.
 
 ```
-For all APIs and docs of autodrive check out [Autodrive](https://github.com/trulynotafan/p2p-news-app/tree/main/src/node_modules/autodrive)
+For all APIs and docs of autodrive check out [Autodrive](https://github.com/af44n/p2p-news-app/tree/main/lib/node_modules/autodisk)
 
 
 
@@ -242,7 +244,7 @@ The `init_block` contains all the drive_key. If you want to see more on how we m
 
 ### Subscription 
 - Devices can subscribe to external (non-paired) peers
-- Subscription state managed in localStorage for persistence
+- Subscription state managed in localStorage for persistence (now `subscribed_peers` in the vault, see p2p-news-app-content, so it syncs to your other devices)
 ```javascript 
 function set_subscription_store (s) { subscription_store = s }
 
@@ -263,10 +265,9 @@ function add_local_subscribed_peer (key) {
 
 ### Advanced Device Management & Liveness
 We've stepped up how we track multiple devices under one identity:
-- **Liveness Tracking:** Devices regularly stamp their activity. If a device goes quiet for too long, it gets flagged as "inactive" or "dead." The vault automatically syncs these timestamps across peers to prevent conflicts.
-- **Petnames:** Since hex keys are impossible to remember, you can give your devices friendly names (like "My Laptop").
-- **Recovery Exemptions:** You can mark specific devices as "critical." This protects them from being accidentally removed.
-- **Safe Removal:** If you try to kick a device (or if an automated cleanup tries to), it now forces a "Yes/No" confirmation workflow to prevent disasters.
+- **Liveness Tracking:** Each device writes its `last_online` into its `paired_devices/<device>` record in the vault when it logs in. The admin ui shows a device as "DEAD" when that is more than 30 days ago, and then asks or removes it, depending on the devices policy (Prompt or Auto-Remove).
+- **Petnames:** Since hex keys are impossible to remember, you can give your devices friendly names (like "My Laptop"), the admin ui saves the name in the devices record.
+- **Safe Removal:** If you try to kick a device in the admin ui, it asks for confirmation first. The 30 day Auto-Remove policy removes without asking.
 
 
 ### Access Control

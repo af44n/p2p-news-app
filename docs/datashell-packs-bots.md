@@ -29,7 +29,7 @@ we have nothing like it, closest is `datashell.js` picking the sys/app url from 
 
 ### open_drive
 opens a drive by its id, checks the hash and gives a read only checkout at that exact length.
-our `ds_manager.init(name, key)` and `create_peer_structure()` open autobase/autodrive by key too, but always the latest version and without any hash check. so the pinning part is new.
+our `ds_manager.init(name, key)` and `create_peer_structure()` open autobase/autodisk by key too, but always the latest version and without any hash check. so the pinning part is new.
 
 ### load
 loads a generator or entry file straight from the drive with `bare-module`'s Loader. only a fixed list of modules can be required and `import()` is blocked.
@@ -86,7 +86,7 @@ our cli is just one interactive process (`bare lib/run.js`), so this is new too.
 ## main differences 
 
 1. **versions.** we're on corestore 6 / hypercore 10 because it works in the browser, basim is on corestore 7 / hyperdrive 13. i ran his `scripts/docs.js` against our versions: 4 of 20 tests pass as is, and all 21 pass after porting two calls, `store.storage.getAuth()` and his `purge()`, which both only exist in corestore 7. `docs/version-check.js` shows the same thing from our side. so versions aren't really the blocker i guess.
-2. **hyperdrive vs autodrive.** his packs are plain hyperdrives (one writer). serapath wants packs to be autodrives so every device can write. but our autodrive builds its file view per device, so the same files get a different key and hash on each device, and a `dat://…<hash>` link made on device A won't check out on device B. it also has no `entry()`, so his loader and `mirror-drive` can't use it directly (only through `base.view.drive`). this is the main open question.
+2. **hyperdrive vs autodisk.** his packs are plain hyperdrives (one writer). serapath wants packs to be autodisks so every device can write. but our autodisk builds its file view per device, so the same files get a different key and hash on each device, and a `dat://…<hash>` link made on device A won't check out on device B. it also has no `entry()`, so his loader and `mirror-drive` can't use it directly (only through `base.view.drive`). this was the main open question. fixed since then, the autodisk builds its drive as autobase views now (`a72d018`), so the key and hashes are the same on every device, and it has `entry()` (`22125c7`).
 3. **registry.** his names live in json files on one machine. ours would live in `vault_bee` so all devices see them, which also means other devices can `watch()` them for changes, like `watch_subscriptions()` in p2p-news-app does.
 4. **code loading.** on cli we hand apps the real `require`, his loader only allows a short list of modules and reads every file from the pinned drive. his way is what we want if code comes from other people's drives.
 
@@ -94,7 +94,7 @@ our cli is just one interactive process (`bare lib/run.js`), so this is new too.
 ## what to reuse vs what is new
 
 reuse:
-- `datastructure-manager` + `autodrive` for the drives
+- `datastructure-manager` + `autodisk` for the drives
 - `vault_put` / `vault_get` / `watch` for the pack and bot names instead of json files
 - `device_apps/` style records for "which device runs which bot"
 - the `writer_requests` flow (device asks, owner device approves) as the base for handing a bot over to another device
@@ -104,7 +104,7 @@ take from basim:
 - specifiers (`source()`), generators, `bot.json`
 - the `bare-module` loader with the module whitelist
 - folder import/export with `mirror-drive`
-- pinned links, once we know how they work with autodrive
+- pinned links, once we know how they work with autodisk
 
 new:
 - assigning a bot to exactly one device, and only that device can start it

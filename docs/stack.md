@@ -53,13 +53,11 @@ How do you find your friends in a big club? You might all agree to meet at the b
 ```javascript
 const Hyperswarm = require('hyperswarm');
 const swarm = new Hyperswarm();
-swarm.join('some-topic', (err, discovery) => {
-  if (err) throw err;
-  console.log('joined topic');
-  swarm.on('connection', (socket, info) => {
-    console.log('connection from', info.host);
-    // Handle socket
-  });
+const topic = Buffer.alloc(32).fill('some-topic'); // a topic is 32 bytes
+swarm.join(topic, { server: true, client: true });
+swarm.on('connection', (socket, info) => {
+  console.log('connection from', info.publicKey.toString('hex'));
+  // Handle socket
 });
 ```
 
@@ -115,14 +113,14 @@ for (let i = 0; i < local.view.length; i++) {
 }
 ```
 
-### 6. Autodrive
+### 6. Autodrive (ours is called autodisk now)
 
 It's a merge of hyperdrive and autobase. It's like a shared folder that multiple people can access and that updates in real-time. We can use it to have two people write to one hyperdrive at the same time, and they will both see the same view of the data. Can be very useful if one person has different devices. 
 
-* [Autodrive (our implementation)](https://github.com/trulynotafan/p2p-news-app/tree/main/src/node_modules/autodrive)
+* [Autodisk (our implementation)](https://github.com/af44n/p2p-news-app/tree/main/lib/node_modules/autodisk), used as `autodisk({ store, bootstrap })`
 * [Autodrive by OzymandiasTheGreat](https://github.com/OzymandiasTheGreat/autodrive/tree/main)
 
-**Example Usage:**
+**Example Usage** (OzymandiasTheGreat's autodrive, ours is in its readme)**:**
 
 ```javascript
 import Autodrive from "autodrive";
@@ -252,7 +250,7 @@ const seed = mnemonicToSeed(mnemonic);
 
 ### 2. keet-identity-key
 
-This tool helps you use the same identity across multiple devices, like your phone and your laptop. Using a secret phrase (from bip39), **keet-identity-key** can create secure keys and generate a proof that a new device belongs to you. This way, you can "pair" your devices so they all share the same blog and subscriptions.
+(Not used in the code right now, its not a dependency. Pairing uses `blind-pairing` with an invite code and a verification code, see `lib/node_modules/pairing-manager`.) This tool helps you use the same identity across multiple devices, like your phone and your laptop. Using a secret phrase (from bip39), **keet-identity-key** can create secure keys and generate a proof that a new device belongs to you. This way, you can "pair" your devices so they all share the same blog and subscriptions.
 
 * [keet-identity-key GitHub](https://github.com/holepunchto/keet-identity-key)
 
@@ -310,7 +308,7 @@ console.log(cenc.string.decode(state)); // 'hi'
 
 ### 5. sodium-universal
 
-Security is super important. **Sodium** is a famous, library for all things cryptography, like encrypting messages, creating digital signatures, and hashing data. We use `sodium-universal`, a version that works the same way in both Node.js and web browsers, so our security is consistent everywhere.
+Security is super important. **Sodium** is a famous, library for all things cryptography, like encrypting messages, creating digital signatures, and hashing data. We use `sodium-universal`, a version that works the same way in both Node.js and web browsers, so our security is consistent everywhere. Some of our code (crypto-helpers, and bip39-mnemonic through a patch) uses our own `lib/node_modules/sodium` instead, which is `sodium-native` on bare / node and a browser build in the browser.
 
 * [sodium-universal GitHub](https://github.com/holepunchto/sodium-universal)
 

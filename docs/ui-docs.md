@@ -6,6 +6,8 @@ Welcome! This doc explains the user interfaces (UI) of the P2P News App for both
 
 # Web UI
 
+> The screenshots and code in this web section are from the old web ui (`web/page.js`, `blog-helpers`), those files dont exist anymore. Today login and everything about the vault is the system ui (`lib/websys-ui.js`) with Seed / Pair / Load / Reset All Data, then a system bar with the tabs Invite, Devices, Relays, Net, Performance, Apps and Vault Log. The news app is `lib/webapp-ui.js` on top of `lib/node_modules/p2p-news-app`. Subscribing doesnt copy posts into your own feed anymore, they are read from the other blog, and subscriptions are kept in the vault (`subscribed_peers`), not in local storage. I'll update the screenshots and wil remove this section. 
+
 ## Login & Join
 <img width="507" height="282" alt="image" src="https://github.com/user-attachments/assets/fd0f0562-ea38-450b-8768-4168a938a4b0" />
 
@@ -366,7 +368,7 @@ Welcome! This doc explains the user interfaces (UI) of the P2P News App for both
 <img width="446" height="363" alt="image" src="https://github.com/user-attachments/assets/6f0fdd47-f0ff-4c1e-9b76-8d00a7067f4c" />
 
 - Shows your username and connection status.
-- **Device Management:** You can assign petnames to devices, check their "liveness" (to see if they are dead/inactive), and safely remove them (it'll ask for confirmation first!).
+- **Device Management:** (now in the Devices tab of the system bar) You can rename devices, see when they were last online (marked DEAD after 30 days, then the policy Prompt or Auto-Remove applies), and remove them (it'll ask for confirmation first!).
 - **Reset All Data** button wipes your local data and reloads the app.
 
 <details>
@@ -421,7 +423,7 @@ Once logged in, the system menu allows you to manage your identity before launch
 
 - **Launch App**: Boots the selected data-pod/profile using `cliapp-ui.js`.
 - **Devices**: Lists all devices paired to your identity. Allows renaming or removing devices (removing revokes their write access).
-- **Create Invite Code**: Generates a base64 invite code to add a new device to your identity. Shows a 6-digit PIN for verification.
+- **Create Invite Code**: Generates a base64 invite code to add a new device to your identity. The new device then shows a 6 character code, you type it here to verify (a wrong code asks again, enter cancels).
 - **Vault Log**: Displays the cryptographically verifiable audit log of actions taken by devices in your identity.
 
 <details>
@@ -448,7 +450,7 @@ Once you launch the app, `cliapp-ui.js` takes over, initializing the `p2p-news-a
 - **New Post**: Prompts for a title and content, and appends it to your Autobase structure.
 - **View Posts**: Shows your posts and posts from peers you are subscribed to.
 - **Subscriptions**: Lists discovered peers and allows you to subscribe or unsubscribe from their blogs.
-- **My Profile**: Shows your local and global keys.
+- **My Profile**: Shows your name, your blog key and the local writer key of this device.
 - **Config**: Shows your blog's raw public key for manual sharing.
 
 <details>

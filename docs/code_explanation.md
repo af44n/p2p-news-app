@@ -1,5 +1,7 @@
 # P2P Blog App: Architecture & Code Walkthrough
 
+> This walkthrough was written for an older version of the app (`web/page.js`, `helpers/...`, `web-peer/...`). The files moved into `lib/` since then and some parts changed, the notes in brackets say where things are now. The module readmes in `lib/node_modules/*/README.md` describe the current code.
+
 ---
 
 
@@ -21,7 +23,7 @@ The app is built on top of the [Hypercore Protocol](https://hypercore-protocol.o
 
 ### 1. **Hypercore**
 - **What:** An append-only, cryptographically signed log (like a blockchain, but simpler).
-- **Role:** Stores the sequence of blog events (init, posts, subscriptions, etc.) for each user.
+- **Role:** Stores the sequence of blog events (init, posts, etc.) for each user. (now an autobase `metadata` in the namespace `blog-feed`, so all your devices can write to it)
 - **Example:**
   ```js
   const core = store.get({ name: 'blog-feed' })
@@ -72,7 +74,7 @@ The app is built on top of the [Hypercore Protocol](https://hypercore-protocol.o
 - **Role:** Provides a unified API for all data storage in the app.
 - **Example:**
   ```js
-  const store = new Corestore(RAW('blogs-username'))
+  const store = new Corestore(RAW('identity-browser-peer')) // (was RAW('blogs-username'))
   ```
 
 ### 7. **random-access-web**
@@ -81,7 +83,7 @@ The app is built on top of the [Hypercore Protocol](https://hypercore-protocol.o
 - **Example:**
   ```js
   const RAW = require('random-access-web')
-  const store = new Corestore(RAW('blogs-username'))
+  const store = new Corestore(RAW('identity-browser-peer')) // (was RAW('blogs-username'))
   ```
 
 ### 8. **Auditcore & Datashell Sandboxing**
@@ -92,7 +94,7 @@ The app is built on top of the [Hypercore Protocol](https://hypercore-protocol.o
 
 ## Main Files & Their Roles
 
-### web/page.js
+### web/page.js (now `lib/websys-ui.js` for login / system and `lib/webapp-ui.js` for the news app)
 **Role:** The main browser UI and event handler. Handles login, navigation, rendering, and user actions.
 
 **Key responsibilities:**
@@ -114,19 +116,19 @@ const posts = [
 ```
 
 **How it interacts:**
-- On login, calls `start_browser_peer` and `blog_helper.init_blog`
+- On login, calls `start_browser_peer` and `blog_helper.init_blog` (now `vault.authenticate` in the system ui, then `api.init_blog` in the app)
 - On subscribe/unsubscribe, calls `blog_helper.subscribe`/`unsubscribe`
 - On new peer discovery, listens for events and updates the UI
 
 ---
 
-### helpers/blog-helpers/index.js
+### helpers/blog-helpers/index.js (now `lib/node_modules/p2p-news-app` and `p2p-news-app-content`)
 **Role:** All blog logic, peer management, subscription, and post sync.
 
 **Key responsibilities:**
 - Initializes the user's blog and Hyperdrive
 - Handles peer discovery and maintains a list of connected peers
-- Manages subscriptions (using localStorage for fast lookups)
+- Manages subscriptions (now `subscribed_peers` in the vault, so they sync to your other devices)
 - Downloads and syncs posts from peers
 - Emits update events for UI refresh
 
@@ -136,18 +138,18 @@ async function subscribe(key) {
   const peer_core = store.get(b4a.from(key, 'hex'))
   await peer_core.ready()
   // ... download posts, set up listeners ...
-  add_local_subscribed_peer(key)
+  add_subscribed_peer(key) // (now saved in the vault)
 }
 ```
 
 **How it interacts:**
 - Called by the UI for all blog/peer actions
 - Listens for new cores (peers) and manages re-listening
-- Uses append-only logs for post history, but localStorage for subscriptions
+- Uses append-only logs for post history, and the vault for subscriptions
 
 ---
 
-### web-peer/index.js
+### web-peer/index.js (now `lib/node_modules/identity-networking`)
 **Role:** Handles peer connection, relay, DHT, swarm, and protocol setup.
 
 **Key responsibilities:**
@@ -171,7 +173,7 @@ swarm.on('connection', (relay, details) => {
 
 ---
 
-### helpers/protocol-helpers/index.js
+### helpers/protocol-helpers/index.js (now `lib/node_modules/p2p-news-app-networking`, the channel is `p2p-news-app/feed`)
 **Role:** Protomux protocol and identity exchange logic.
 
 **Key responsibilities:**
@@ -188,7 +190,7 @@ const channel = mux.createChannel({
 
 ---
 
-### helpers/crypto-helpers/index.js
+### helpers/crypto-helpers/index.js (now `lib/node_modules/crypto-helpers`)
 **Role:** Key management, mnemonic generation, save/load.
 
 **Key responsibilities:**
@@ -198,12 +200,12 @@ const channel = mux.createChannel({
 
 **Example: Creating a Keypair**
 ```js
-const { mnemonic, keypair } = await create_mnemonic_keypair({ namespace: 'noisekeys', name: 'noise' })
+const { mnemonic, keypair } = await get_or_create_keypair('vault') // (create_mnemonic_keypair ignores namespace / name)
 ```
 
 ---
 
-### relay/index.js
+### relay/index.js (now `lib/node_modules/relay`)
 **Role:** Simple relay server for browser peers.
 
 **Key responsibilities:**
@@ -223,7 +225,7 @@ server.on('connection', (socket) => {
 ## How It All Works: Step by Step
 
 ### 1. Starting the App & Joining the Network
-- User enters a username and clicks Join.
+- User enters a username and clicks Join. (now Seed with a name, or Pair with an invite code, then launch the app)
 - `page.js` calls `start_browser_peer` (web-peer/index.js), which:
   - Loads/generates a keypair
   - Sets up Corestore, DHT, Hyperswarm, and WebRTC
@@ -241,7 +243,7 @@ server.on('connection', (socket) => {
 - `blog_helper.subscribe`:
   - Downloads all posts from the peer's core and drive
   - Sets up listeners for new posts
-  - Adds the peer key to localStorage for fast reconnection
+  - Adds the peer key to the vault (`subscribed_peers`) for fast reconnection
 - When a subscribed peer reconnects, listeners are re-established automatically.
 
 ### 4. Creating and Syncing Posts
@@ -255,7 +257,7 @@ server.on('connection', (socket) => {
 - All data is local; nothing is stored on a central server.
 
 ### 6. Real-Time Sync & Offline Mode
-- **No More Polling:** Instead of constantly checking for updates, the app listens to native events directly from `Autobee`. When a peer updates their profile or drops a new post, the UI catches the event and re-renders instantly.
+- **No More Polling:** Instead of constantly checking for updates, the app listens to `update` events of the autobases and a vault watch on the subscriptions. When a peer updates their profile or drops a new post, the UI catches the event and re-renders instantly.
 - **Offline Caching:** If your internet drops or the relay server goes offline, the app handles it gracefully. It switches into an offline-cached mode, letting you read your synced posts until the connection comes back.
 
 ---

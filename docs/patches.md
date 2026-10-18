@@ -1,4 +1,6 @@
 
+The patches are in `patches/` (one file per module and version) and `patch-package` applies them on `npm install` (the `postinstall` script).
+
 # Patch 1 (dht-relay)
 
 ## Problem
@@ -30,6 +32,7 @@ This crash occurred because the relay sent a `destroy` protocol message with an 
 
 - Added a helper function to validate uint32 values.
 - Updated the `destroy` message encoder to use this check and encode `0` if the value is invalid.
+- Also in this patch, `lib/protocol.js` calls `setMaxListeners(0)` on the stream separately (it was chained on its return value), and `lib/stream.js` gets a public `sendKeepAlive()` that calls `_sendKeepAlive()`.
 
 
 # Patch 2 (oplog browser compatibility for hypercore consistent storage)
@@ -138,11 +141,16 @@ The root cause appears to be because of browsers using dht-relay and Websockets.
           }
         }
 ```
-Find the whole code [here](https://www.diffchecker.com/IHbjbx0M/) (This link will be updated with github link once we finalize and add it into patch-package)
+Find the whole code in [patches/blind-pairing+2.3.1.patch](../patches/blind-pairing+2.3.1.patch) (it also fixes `const closest` to `let closest`, the old code never updated it)
 
 
 
 This patch allows `blind-pairing` to be successfully completed along both browser and node/bare environments.
+
+
+# Patch 4 (bip39-mnemonic)
+
+`bip39-mnemonic` requires our own `sodium` module (`lib/node_modules/sodium`) instead of `sodium-universal`. That module is `sodium-native` on bare / node and `browser.js` in the browser, so the seed phrase code uses the same sodium as the rest of the app. Its a one line change in `index.js`, see [patches/bip39-mnemonic+2.5.0.patch](../patches/bip39-mnemonic+2.5.0.patch).
 
 
 
