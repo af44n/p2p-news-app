@@ -7,7 +7,7 @@ So basim built `packs` (named drives) and `tasks` (bots that run from drives) in
 - **packs** = a name pointing at one exact version of a drive, e.g. `flamingo-node -> dat://<length>.<fork>.<id>.<hash>`. you can fill a pack from a folder, from another drive, or by running a generator file. it's just data, nothing runs.
 - **tasks** (the `bot` command) = a pack that also has a `bot.json` saying which code to run, e.g. `{ "entry": "dat://…/main.js" }`. you can start it in the background, stop it, check if it's running. only one run at a time.
 
-On our side we don't have "packs" or "bots" by name, but a lot of the pieces exist already, just built for apps:
+On our side we don't have "packs" or "bots" by name, but a lot of the pieces exist already, just built for apps (since then there is a `packs` module, create / list / get / pin / remove, `5a50bfc`, not wired into datashell yet):
 - `datastructure-manager` creates and opens drives by name
 - `register_app` keeps a name -> drive keys record in the vault (`apps/<id>`)
 - `datashell.js` already loads app code and runs it
@@ -45,7 +45,7 @@ we store keys and not versions, so we always read the latest anyway. only needed
 
 ### remove
 deletes one drive from disk plus its names.
-we can't delete a single drive. `reset_all_data()` wipes everything, and the "Reset Data" button in `websys-ui` only deletes the vault records, the cores stay on disk. `core.purge()` works on our version though (see `docs/version-check.js`).
+we can't delete a single drive (packs `remove(name)` does that now, it purges the disks cores and deletes its record). `reset_all_data()` wipes everything, and the "Reset Data" button in `websys-ui` only deletes the vault records, the cores stay on disk. `core.purge()` works on our version though (see `docs/version-check.js`).
 
 ### import / export
 copies a drive to or from a normal folder with `mirror-drive` + `localdrive`, keeping file modes and empty folders.

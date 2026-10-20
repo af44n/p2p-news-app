@@ -32,7 +32,7 @@ Clone the repository:
 
 e.g: `npm run relay`                                                  
 ```
-> p2p-news-app@0.0.1 relay
+> p2p-news-app-workspace@0.0.1 relay
 > node lib/node_modules/relay/index.js
 
 Relay running on ws://localhost:8080
