@@ -13,7 +13,7 @@ Also I have made a demo video which you guys can check that essentially explains
 We've added some cool stuff recently:
 - **Offline Mode:** If the relay crashes, the app just falls back to cached data.
 - **Device Management:** You can now give devices petnames, kick them out safely, and see which ones are dead.
-- **Top Bar:** A sticky top bar so you always know who you're logged in as.
+- **Top Bar:** A top bar that shows which profile you're logged in as.
 
 For Web peers there is my deployed [github_page](https://af44n.github.io/p2p-news-app/). The hosted relay it uses by default is down right now (and its url has no `wss://`), so add a running relay in the Relays tab of the system bar and set it as default, or run everything locally like below.
 

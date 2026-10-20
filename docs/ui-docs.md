@@ -387,7 +387,7 @@ Welcome! This doc explains the user interfaces (UI) of the P2P News App for both
 </details>
 
 ## Persistent Top Bar
-- We added a sticky top bar across all views so you always know exactly which identity and device you're currently using. Super helpful for multi-tab setups!
+- We added a top bar across all views so you always know which profile you're currently using. Super helpful for multi-tab setups!
 
 ---
 
