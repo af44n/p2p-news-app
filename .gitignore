@@ -1,10 +1,6 @@
 /node_modules
-/.babelrc
 /storage*
-/.eslintrc
 .*-seedphrase
-/src/node_modules/bare-peer/node_modules
-/src/node_modules/bare-peer/package-lock.json
 .DS_Store
 .vscode
 /package-lock.json
