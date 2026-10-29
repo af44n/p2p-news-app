@@ -4,7 +4,7 @@ This document explains the main terms and concepts used across the p2p architect
 
 ## Identity & People
 
-* **User**: A person using the system. Technically, a user is defined by their **root identity seed phrase** (planned, right now every device makes its own seed phrase and the vault is what ties your devices together).
+* **User**: A person using the system. Technically, a user is defined by their **root identity seed phrase** (only the first device makes it, its shown once and never saved, every device knows its public key from the vault as `user/public_key`).
 * **Peer**: Another person (or external user) on the network. From your perspective, anyone not sharing your root seed phrase is a peer.
 
 ## Devices & Environments
