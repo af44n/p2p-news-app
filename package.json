@@ -64,7 +64,8 @@
     "postinstall": "patch-package",
     "web:news": "budo web/page.js:web/bundle.js --dir . --live --open -- -i STATE",
     "build:news": "browserify web/page.js -i STATE -o web/bundle.js",
-    "build:vault": "node lib/build-vault.js"
+    "build:vault": "node lib/build-vault.js",
+    "test:web": "npm run build:vault && (budo test/web.js:test/bundle.js --dir . --port 9970 & budo test/web.js:test/bundle.js --dir . --port 9971)"
   },
   "keywords": [
     "p2p",

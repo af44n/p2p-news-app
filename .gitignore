@@ -4,3 +4,4 @@
 .DS_Store
 .vscode
 /package-lock.json
+/test/bundle.js
