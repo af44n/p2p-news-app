@@ -77,24 +77,24 @@
     "@geut/sodium-javascript-plus": "^0.0.6",
     "@hyperswarm/dht-relay": "^0.4.3",
     "@hyperswarm/testnet": "^3.1.4",
-    "acorn": "8.18.0",
+    "acorn": "8.19.0",
     "acorn-walk": "8.3.5",
-    "autobase": "^6.5.13",
+    "autobase": "^7.28.2",
     "b4a": "^1.6.7",
     "bare-crypto": "^1.4.5",
-    "bare-fs": "^4.1.6",
-    "bare-module": "7.0.1",
+    "bare-fs": "^4.8.4",
+    "bare-module": "^7.5.0",
     "bare-path": "^3.0.0",
     "bare-process": "^4.2.1",
     "bare-subprocess": "^6.2.2",
     "bip39-mnemonic": "^2.4.0",
     "blind-pairing": "^2.3.1",
     "blind-pairing-core": "^2.9.0",
-    "corestore": "^6.18.4",
+    "corestore": "^7.15.0",
     "graph-explorer": "github:ddroid/graph-explorer",
     "hyper-webrtc": "^1.0.0",
     "hypercore-crypto": "^3.6.1",
-    "hyperdrive": "^11.13.4",
+    "hyperdrive": "^13.3.4",
     "hyperswarm": "^4.8.4",
     "random-access-memory": "^6.2.1",
     "random-access-web": "^2.0.3",
@@ -109,8 +109,6 @@
     "standardx": "^7.0.0"
   },
   "overrides": {
-    "hypercore": "10.38.2",
-    "mirror-drive": "1.10.0",
-    "hyperbee": "2.26.5"
+    "mirror-drive": "1.10.0"
   }
 }
