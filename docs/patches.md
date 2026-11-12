@@ -3,36 +3,10 @@ The patches are in `patches/` (one file per module and version) and `patch-packa
 
 # Patch 1 (dht-relay)
 
-## Problem
+dht-relay comes from serapath's fork [serapath/hyperdht-relay](https://github.com/serapath/hyperdht-relay) now. it already has the fix for the relay crashing when a peer disconnects (upstream #27, the `uint must be positive` error in the `destroy` message, the old patch guarded the alias for that) and the announce signing fix for `custodial: false`, so both are gone from the patch.
 
-When a peer disconnected, the relay crashed with:
-
-```
-Error: uint must be positive
-    at validateUint (compact-encoding/index.js:765)
-    at Object.encode (compact-encoding/index.js:94)
-    at Object.encode (dht-relay/lib/messages.js:193)
-    ...
-```
-
-This crash occurred because the relay sent a `destroy` protocol message with an `alias` or `remoteAlias` value that was not a valid uint32 (such as `undefined`, `null`, or a negative number). The encoder requires a valid uint32, and any invalid value causes the process to terminate.
-
-## Root Cause
-
-- The relay’s disconnect and error handling logic sent `alias` or `remoteAlias` values that were not valid uint32 values to the message encoder in `lib/messages.js`.
-- The encoder threw an error if the value was not a valid uint32, resulting in a crash.
-
-## Solution
-
-- The `destroy` message encoder in `lib/messages.js` now verifies that `alias` and `remoteAlias` are valid uint32 values before encoding.
-- If the value is not valid, the encoder writes `0` (which is always valid and will not crash).
-- This change ensures the relay never crashes due to malformed disconnect or error messages, regardless of upstream input.
-
-## Code Change Summary
-
-- Added a helper function to validate uint32 values.
-- Updated the `destroy` message encoder to use this check and encode `0` if the value is invalid.
-- Also in this patch, `lib/protocol.js` calls `setMaxListeners(0)` on the stream separately (it was chained on its return value), and `lib/stream.js` gets a public `sendKeepAlive()` that calls `_sendKeepAlive()`.
+what the patch still does
+- `lib/stream.js` gets a public `sendKeepAlive()` that calls `_sendKeepAlive()` (same as the open upstream PR #29, hyperswarm calls it on a duplicate connection)
 
 
 # Patch 2 (oplog browser compatibility for hypercore consistent storage)

@@ -75,7 +75,7 @@
   "license": "ISC",
   "dependencies": {
     "@geut/sodium-javascript-plus": "^0.0.6",
-    "@hyperswarm/dht-relay": "^0.4.3",
+    "@hyperswarm/dht-relay": "github:serapath/hyperdht-relay#f18b9e0201cae28172a1245b142c7845be60d58f",
     "@hyperswarm/testnet": "^3.1.4",
     "acorn": "8.19.0",
     "acorn-walk": "8.3.5",
