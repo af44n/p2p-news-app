@@ -2,7 +2,7 @@
 
 u said every test should be a file with resutls and what they mean, so we build up a common understanding and basim and others can build on it. so here are all the checks behind what i told u in the worklog-43 44 and 45 threads. each script prints `ok` or `NOT ok` per claim with the values it saw, and exits with 1 if something isnt ok.. the comments at the top of each script explian the claim and where in the autobase / hypercore code it comes from.
 
-all run on our verisons (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
+all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, not rerun on the latest ones yet), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
 
 ## fork is always 0
 

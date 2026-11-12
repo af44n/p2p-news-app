@@ -52,6 +52,8 @@ e.g: `npm run build && npm run web`
 ```
 Now open the webpage, click Seed and enter your name (or Pair with an invite code from your other device), launch the app, have your friends join aswell and when two peers connect, you can subsribe to each other and exchange blogs, fully decentralized. 
 
+open `http://localhost:9966` (or https), not the `192.168.x.x` address budo prints, the vault storage (opfs) only works on a secure page. the vault runs in a SharedWorker so all tabs of the site share it, after a rebuild close every tab of the site once, a running SharedWorker keeps the old code
+
 **Screenshot**
 
 <img width="623" height="316" alt="image" src="https://github.com/user-attachments/assets/daffc03b-a036-4beb-a3db-6586b151bef2" />

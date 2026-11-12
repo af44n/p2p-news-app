@@ -2,7 +2,7 @@
 
 folow up to `docs/datashell-vault-records.md`. so u wanted the exact steps for moving a bot from one device to another without it ever running twice, plus all the edge cases and recovery. im using the flamingo lightning wallet as the example, cuz if 2 copies of a lightning node run with the same channels u can lose all the funds. so if it works for that it works for everything basically.
 
-nothing here is implmented yet. i did test some stuff on plain autobase 6.5.13 (what we're on) with a few small scripts, i marked those **tested**. rest is just proposal.
+nothing here is implmented yet. i did test some stuff on plain autobase 6.5.13 (what we were on then) with a few small scripts, i marked those **tested**. rest is just proposal.
 
 like u said it builds on 2 sub docs, the sleep module ([sleep-watch](../lib/node_modules/sleep-watch/README.md)) and the mnemonic recovery doc (not written yet)
 

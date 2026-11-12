@@ -1,6 +1,6 @@
 # autobase, how it works and what to watch out for
 
-a short description of autobase 6.5.13 (what we use), so we can refine it over time. everything here is from the autobase / hypercore code or from the checks in this folder, the results of those are in [autobase-checks.md](autobase-checks.md). the vault bee, the audit log and every disk are autobases, how our disks use it is in [disks.md](disks.md).
+a short description of autobase 6.5.13 (what we used till november, we're on autobase 7 now and this hasnt been checked against it yet), so we can refine it over time. everything here is from the autobase / hypercore code or from the checks in this folder, the results of those are in [autobase-checks.md](autobase-checks.md). the vault bee, the audit log and every disk are autobases, how our disks use it is in [disks.md](disks.md).
 
 ## how it works
 
