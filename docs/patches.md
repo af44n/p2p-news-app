@@ -122,11 +122,3 @@ Find the whole code in [patches/blind-pairing+2.3.1.patch](../patches/blind-pair
 This patch allows `blind-pairing` to be successfully completed along both browser and node/bare environments.
 
 
-# Patch 4 (bip39-mnemonic)
-
-`bip39-mnemonic` requires our own `sodium` module (`lib/node_modules/sodium`) instead of `sodium-universal`. That module is `sodium-native` on bare / node and `browser.js` in the browser, so the seed phrase code uses the same sodium as the rest of the app. Its a one line change in `index.js`, see [patches/bip39-mnemonic+2.5.0.patch](../patches/bip39-mnemonic+2.5.0.patch).
-
-
-
-
-

@@ -74,7 +74,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@geut/sodium-javascript-plus": "^0.0.6",
     "@hyperswarm/dht-relay": "github:serapath/hyperdht-relay#f18b9e0201cae28172a1245b142c7845be60d58f",
     "@hyperswarm/testnet": "^3.1.4",
     "acorn": "8.19.0",
@@ -98,8 +97,7 @@
     "hyperswarm": "^4.8.4",
     "random-access-memory": "^6.2.1",
     "random-access-web": "^2.0.3",
-    "sodium-javascript": "^0.8.0",
-    "sodium-universal": "^5.0.1",
+    "sodium-universal": "github:serapath/sodium-crypto#b0de879f4df65b58d314646e9e8e7354dda25e77",
     "ws": "^8.18.1"
   },
   "devDependencies": {
@@ -109,6 +107,7 @@
     "standardx": "^7.0.0"
   },
   "overrides": {
-    "mirror-drive": "1.10.0"
+    "mirror-drive": "1.10.0",
+    "sodium-universal": "$sodium-universal"
   }
 }
