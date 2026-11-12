@@ -81,11 +81,11 @@ The root cause appears to be because of browsers using dht-relay and Websockets.
 
 ## Solution
 
-- Added a condition in blind-pairing so that if the `rtt` object is undefined we will just 0 as the closest value.
+- a channel without an `rtt` (a relayed stream) counts as `rtt` 0
 
 ## Code Change Summary
 
-- This codition has been added before the rtt-value assignment: `const fixed_rtt = (rtt !== undefined && rtt !== null) ? rtt : 0`
+- `const rtt = ch._mux.stream.rawStream?.rtt ?? 0`, and `closest` is updated now so it really picks the closest channel
 
 ## Example Before
 
@@ -98,21 +98,10 @@ The root cause appears to be because of browsers using dht-relay and Websockets.
 ## Example After
 
 ```js
-        try {
-          const { rtt } = ch._mux.stream.rawStream
-          console.log({rtt})
-          // Handle undefined RTT in browser environment - use 0 as fallback
-          const fixed_rtt = (rtt !== undefined && rtt !== null) ? rtt : 0
-          if ( fixed_rtt < closest) {
-            closest = fixed_rtt
-            channel = ch
-          }
-        } catch (error) {
-          // If RTT access fails completely, (haven't but still) still use the channel with fallback RTT of 0
-          if (0 < closest) {
-            closest = 0
-            channel = ch
-          }
+        const rtt = ch._mux.stream.rawStream?.rtt ?? 0 // a relayed stream (dht-relay in browsers) has no rtt
+        if (rtt < closest) {
+          closest = rtt
+          channel = ch
         }
 ```
 Find the whole code in [patches/blind-pairing+2.3.1.patch](../patches/blind-pairing+2.3.1.patch) (it also fixes `const closest` to `let closest`, the old code never updated it)
