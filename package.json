@@ -76,7 +76,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@hyperswarm/dht-relay": "github:serapath/hyperdht-relay#f18b9e0201cae28172a1245b142c7845be60d58f",
+    "@hyperswarm/dht-relay": "github:serapath/hyperdht-relay#16f92d1bce6addd3e282e7344f4f4450ebf15e3c",
     "@hyperswarm/testnet": "^3.1.4",
     "acorn": "8.19.0",
     "acorn-walk": "8.3.5",

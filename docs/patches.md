@@ -1,15 +1,7 @@
 
 The patches are in `patches/` (one file per module and version) and `patch-package` applies them on `npm install` (the `postinstall` script).
 
-# Patch 1 (dht-relay)
-
-dht-relay comes from serapath's fork [serapath/hyperdht-relay](https://github.com/serapath/hyperdht-relay) now. it already has the fix for the relay crashing when a peer disconnects (upstream #27, the `uint must be positive` error in the `destroy` message, the old patch guarded the alias for that) and the announce signing fix for `custodial: false`, so both are gone from the patch.
-
-what the patch still does
-- `lib/stream.js` gets a public `sendKeepAlive()` that calls `_sendKeepAlive()` (same as the open upstream PR #29, hyperswarm calls it on a duplicate connection)
-
-
-# Patch 2 (blind-pairing)
+# Patch 1 (blind-pairing)
 
 ## Problem
 
