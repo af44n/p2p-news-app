@@ -32,6 +32,7 @@ async function device_a (run) {
   const news1 = (await tab1.open_app(app_id, 'ali')).news_app()
   await news1.init_blog({ username: 'ali' })
   await news1.create_post('hello from a', 'web test')
+  await news1.create_post('big post from a', 'x'.repeat(40 * 1024)) // more than one 16KB data channel piece over webrtc
   const news2 = (await tab2.open_app(app_id, 'ali')).news_app()
   await news2.init_blog({ username: 'ali' })
   check('both tabs share one news app (same blog key)', await news1.get_autobase_key() === await news2.get_autobase_key())
@@ -48,6 +49,7 @@ async function device_a (run) {
   const seen = await wait_message(b, 'posts', 90000)
   check('device b pairs with the invite and the verification code', !!seen)
   check('a post from device a shows on device b', seen.some(title => title === 'hello from a'), seen.join())
+  check('a 40KB post reaches device b too (its webrtc messages go in pieces)', seen.some(title => title === 'big post from a'), seen.join())
   const from_b = await wait_for(() => tab2.vault_get('test/from-b'), 60000).catch(() => null)
   check('device b is a writer too, a value it puts reaches device a', from_b?.device === 'b')
 }
@@ -64,7 +66,7 @@ async function device_b (run) {
     tab.complete_authentication()
     const news = (await tab.open_app(app.id, 'ali')).news_app()
     await news.init_blog({ username: 'ali' })
-    const posts = await wait_for(async () => { const list = await news.get_my_posts(); return list.length && list }, 60000)
+    const posts = await wait_for(async () => { const list = await news.get_my_posts(); return list.length >= 2 && list }, 60000)
     await tab.vault_put('test/from-b', { device: 'b' })
     parent.postMessage({ type: 'posts', data: posts.map(post => post.title) }, '*')
   }
