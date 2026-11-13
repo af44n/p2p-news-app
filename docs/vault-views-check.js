@@ -10,7 +10,7 @@ const b4a = require('b4a')
 const Autobase = require('autobase')
 const Hyperbee = require('hyperbee')
 const Corestore = require('corestore')
-const { create_autobee } = require('../lib/node_modules/autobee')
+const { create_automap } = require('../lib/node_modules/automap')
 const { create_auditcore } = require('../lib/node_modules/auditcore')
 
 const WRITES = +process.env.WRITES || 300
@@ -74,7 +74,7 @@ THE 2 VARIANTS
 both give put(key, value) that writes the bee entry and its audit entry, like vault_put in identity-operations
 ***************************************/
 async function open_two_bases (store, keys = {}) {
-  const bee = create_autobee({ store: store.namespace('vault-bee'), bootstrap: keys.bee || null })
+  const bee = create_automap({ store: store.namespace('vault-bee'), bootstrap: keys.bee || null })
   const audit = create_auditcore({ store: store.namespace('vault-audit'), bootstrap: keys.audit || null })
   await bee.ready()
   await audit.ready()

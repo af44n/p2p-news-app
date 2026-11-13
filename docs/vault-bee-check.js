@@ -10,7 +10,7 @@ const os = require('os')
 const fs = require('fs')
 const Corestore = require('corestore')
 const b4a = require('b4a')
-const { create_autobee } = require('../lib/node_modules/autobee')
+const { create_automap } = require('../lib/node_modules/automap')
 
 const WATCHED = 'lupay:p2p-news-app/subscribed_peers'
 const results = []
@@ -19,9 +19,9 @@ main().then(on_done, on_error)
 
 async function main () {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-bee-check-'))
-  const a = create_autobee({ store: new Corestore(path.join(dir, 'a')).namespace('vault-bee') })
+  const a = create_automap({ store: new Corestore(path.join(dir, 'a')).namespace('vault-bee') })
   await a.ready()
-  const b = create_autobee({ store: new Corestore(path.join(dir, 'b')).namespace('vault-bee'), bootstrap: a.key })
+  const b = create_automap({ store: new Corestore(path.join(dir, 'b')).namespace('vault-bee'), bootstrap: a.key })
   await b.ready()
   const stream_a = a.replicate(true)
   const stream_b = b.replicate(false)

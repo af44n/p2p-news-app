@@ -13,7 +13,7 @@ const path = require('bare-path')
 const Corestore = require('corestore')
 const b4a = require('b4a')
 const id = require('hypercore-id-encoding')
-const { create_autobee } = require('../lib/node_modules/autobee')
+const { create_automap } = require('../lib/node_modules/automap')
 const autodisk = require('../lib/node_modules/autodisk')
 const disk_link = require('../lib/node_modules/disk-link')
 const disk_loader = require('../lib/node_modules/disk-loader')
@@ -74,7 +74,7 @@ HELPERS
 ***************************************/
 // just enough of the vault api for packs (vault_put / vault_get / vault_del on an autobee)
 async function make_vault (store) {
-  const bee = create_autobee({ store: store.namespace('vault-bee') })
+  const bee = create_automap({ store: store.namespace('vault-bee') })
   await bee.ready()
   return { store, get_vault_bee: () => bee, vault_put: (k, v) => bee.put(k, v), vault_get: async k => (await bee.get(k))?.value || null, vault_del: k => bee.del(k) }
 }
