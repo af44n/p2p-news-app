@@ -25,6 +25,12 @@ async function device_a (run) {
   check('tab 2 gets the vault tab 1 made, without logging in again', (await tab2.user).username === 'ali')
   await tab1.vault_put('test/hello', { from: 'tab 1' })
   check('a value tab 1 puts is read by tab 2', (await tab2.vault_get('test/hello'))?.from === 'tab 1')
+  // the put and its audit entry are one append, so the entry has the bee length right after the put (meta.views.bee)
+  const logged = (await tab1.get_vault_audit().read()).findLast(entry => entry.data.params?.key === 'test/hello')
+  const length = logged?.meta.views?.bee || 1
+  const bee = tab1.get_vault_bee()
+  const [at, before] = [await bee.checkout(length).get('test/hello'), await bee.checkout(length - 1).get('test/hello')]
+  check('the audit entry of a put has the bee length, the bee has the value at that length and not one before', logged?.meta.views && at?.value.from === 'tab 1' && before === null, JSON.stringify(logged?.meta))
   const key = await tab1.vault_get('user/public_key')
   check('the user key is in the vault, the seed phrase isnt', key?.length === 64 && !Object.keys(localStorage).some(k => /seed/.test(k)))
   // the news app runs once in the worker and both tabs use it
