@@ -1,6 +1,21 @@
 
 The patches are in `patches/` (one file per module and version) and `patch-package` applies them on `npm install` (the `postinstall` script).
 
+# How we make and apply a patch
+
+works the same in any repo, e.g. flamingo-node
+
+1. once, add `patch-package` to `devDependencies` and `"postinstall": "patch-package"` to `scripts` in `package.json`
+2. fix the file right in `node_modules/<module>/...` and try it
+3. `npx patch-package <module>` writes the diff to `patches/<module>+<version>.patch` (a nested copy is `npx patch-package <parent>/<module>`, scoped ones work the same, `@scope/name`). to change a patch later, edit `node_modules` again and run the same command
+4. commit only the `.patch` file, every `npm install` applies it again
+5. when the module gets a new version the patch is for the old version number, check the `npm install` output. locally patch-package exits with 0 even when a patch didnt apply (on CI it fails), so a broken patch is easy to miss
+6. send the fix upstream as a PR. once its merged and released, update the module and delete the `.patch` file
+
+if the fix is in a module we have our own fork of, we dont patch, we point the dependency at the fork commit instead, like `"@hyperswarm/dht-relay": "github:serapath/hyperdht-relay#<commit>"` (and `overrides` if other modules depend on it too, like `sodium-universal`)
+
+the patches left now: blind-pairing (below), till [holepunchto/blind-pairing#15](https://github.com/holepunchto/blind-pairing/pull/15) is merged
+
 # Patch 1 (blind-pairing)
 
 ## Problem
