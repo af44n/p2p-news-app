@@ -71,6 +71,7 @@ thats what i meant with, "old local vaults lose their old log entries". i think 
 
 - both write at the same time, then both have the same bee key, length, signed hash and values, and the bee is a view autobase knows about. remove_writer still works
 - with the autobee from before `77fa37d` the same check fails, diffrent keys and lengths (7 and 9) with the same values, thats the bug from the worklog-43 thread
+- ported to autobase 7 (views are hypercores with `signedLength` now) and the vault base (the bee + the audit log in one autobase), all 5 still ok
 ## reading back an empty block on bare
 
 `bare docs/empty-block-check.js` and `node docs/empty-block-check.js` (corestore 6 + random-access-file 4.1.2, the bug basim found)

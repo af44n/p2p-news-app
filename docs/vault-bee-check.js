@@ -1,5 +1,6 @@
 // is the vault bee the same on every device now that its a real autobase view (77fa37d)? results in docs/autobase-checks.md
 // run with: node docs/vault-bee-check.js (fails with the autobee from before 77fa37d, different keys)
+// on autobase 7 now, with the vault base like identity makes it (the bee and the audit log are views of one autobase)
 // 1. b becomes a writer
 // 2. after writting at the same time both have the same bee key, length, signed hash and values
 // 3. a watch on the other device fires when the key changes
@@ -11,6 +12,7 @@ const fs = require('fs')
 const Corestore = require('corestore')
 const b4a = require('b4a')
 const { create_automap } = require('../lib/node_modules/automap')
+const { create_vault_base } = require('../lib/node_modules/vault-base')
 
 const WATCHED = 'lupay:p2p-news-app/subscribed_peers'
 const results = []
@@ -19,9 +21,9 @@ main().then(on_done, on_error)
 
 async function main () {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-bee-check-'))
-  const a = create_automap({ store: new Corestore(path.join(dir, 'a')).namespace('vault-bee') })
+  const a = create_automap({ base: create_vault_base(new Corestore(path.join(dir, 'a')).namespace('vault')) })
   await a.ready()
-  const b = create_automap({ store: new Corestore(path.join(dir, 'b')).namespace('vault-bee'), bootstrap: a.key })
+  const b = create_automap({ base: create_vault_base(new Corestore(path.join(dir, 'b')).namespace('vault'), a.key) })
   await b.ready()
   const stream_a = a.replicate(true)
   const stream_b = b.replicate(false)
@@ -38,10 +40,10 @@ async function main () {
   await settle([a, b], () => all_signed_and_synced(a, b))
   const same_values = JSON.stringify(await values(a)) === JSON.stringify(await values(b))
   const same_hash = b4a.equals(await signed_hash(a), await signed_hash(b))
-  console.log(`   a: bee key ${short(a.core.key)} length ${a.core.length} signed ${signed_core(a).length}`)
-  console.log(`   b: bee key ${short(b.core.key)} length ${b.core.length} signed ${signed_core(b).length}`)
+  console.log(`   a: bee key ${short(a.core.key)} length ${a.core.length} signed ${signed_length(a)}`)
+  console.log(`   b: bee key ${short(b.core.key)} length ${b.core.length} signed ${signed_length(b)}`)
   show(`2. after writing at the same time: same bee key ${b4a.equals(a.core.key, b.core.key)}, same length ${a.core.length === b.core.length}, same signed hash ${same_hash}, same values ${same_values}`, b4a.equals(a.core.key, b.core.key) && a.core.length === b.core.length && same_hash && same_values)
-  const is_view = !!a.base._viewStore.getByKey(a.core.key)
+  const is_view = a.base._viewStore.listViews().some(view => view.name === 'bee' && b4a.equals(view.key, a.core.key))
   show(`   the bee is a view autobase knows about: ${is_view}`, is_view)
   // 3.
   show(`3. the watch on b fired ${state.fired} time(s) when a changed ${WATCHED}`, state.fired >= 1)
@@ -60,7 +62,7 @@ async function count_changes (watcher) {
 
 async function all_signed_and_synced (a, b) {
   const has_all = (await b.get(WATCHED)) && (await a.get('three'))
-  return has_all && signed_core(a).length === a.core.length && signed_core(b).length === b.core.length && a.core.length === b.core.length
+  return has_all && signed_length(a) === a.core.length && signed_length(b) === b.core.length && a.core.length === b.core.length
 }
 
 async function values (bee) {
@@ -69,10 +71,10 @@ async function values (bee) {
   return out
 }
 
-// the real hypercore behind the bee view, it only ever holds signed blocks
-// (the old autobee from before 77fa37d has a plain core there, so then its just that core)
-function signed_core (bee) { return bee.core.getBackingCore ? bee.core.getBackingCore().session : bee.core }
-function signed_hash (bee) { return signed_core(bee).treeHash(signed_core(bee).length) }
+// autobase 7 views are hypercores with a signedLength, the blocks up to it are signed by the indexers
+// (the old autobee from before 77fa37d has a plain core there, so then its just its length)
+function signed_length (bee) { return bee.core.signedLength ?? bee.core.length }
+function signed_hash (bee) { return bee.core.treeHash(signed_length(bee)) }
 
 async function settle (bees, done) {
   for (let i = 0; i < 150; i++) {
