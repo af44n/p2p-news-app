@@ -1,7 +1,8 @@
 // serapath's idea for recovery when every device is lost: a plain hypercore made with the seed phrase keypair (the
 // "master core"). every message (the first device's vault, later a restore) truncates to the current length with
-// the date as the new fork id and appends one message, then the keypair is dropped again. a newer date wins, so an
-// old copy of the core that comes back later gets truncated to the new one
+// a new fork id, max(date in ms, last fork + 1), and appends one message, then the keypair is dropped again. a higher
+// fork wins, so an old copy of the core that comes back later gets truncated to the new one, also when the clock of
+// the restoring device is behind
 // devices here, ali (the first device, lost later), a backup that only replicates, and a new device after the loss
 // plain hypercore 11 + corestore 7, not our vault code. run with: node docs/master-core-check.js
 const fs = require('fs')
@@ -68,16 +69,16 @@ async function main () {
   console.log(`info, a restore with an older date on a device that has the newer fork: ${lower}`)
   streams = connect(other, backup)
   await wait(() => backup_core.fork !== current, [backup_core], 5000)
-  check('a restore with an older date than the current fork doesnt replace it on the backup', backup_core.fork === current && (await backup_core.get(1)).vault === 'v3', `backup fork ${backup_core.fork}`)
+  check('a restore on a device whose clock is behind still gets a higher fork (last fork + 1) and replaces the old one on the backup', backup_core.fork === current + 1 && (await backup_core.get(2, { wait: true, timeout: 5000 }).catch(() => null))?.vault === 'v4', `backup fork ${backup_core.fork}`)
   streams.forEach(stream => stream.destroy())
   await other.close()
   for (const store of [ali, backup, fresh]) await store.close()
   fs.rmSync(root, { recursive: true, force: true })
 }
 
-// one message: truncate to the current length with the date (ms) as the new fork id, then append
+// one message: truncate to the current length with a new fork id, the date (ms) or last fork + 1 if the date isnt higher, then append
 async function write (core, message, keyPair, date) {
-  await core.truncate(core.length, { fork: date, keyPair })
+  await core.truncate(core.length, { fork: Math.max(date, core.fork + 1), keyPair })
   await core.append(message, { keyPair })
 }
 
