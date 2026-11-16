@@ -9,8 +9,8 @@ npm run test:web   # builds vault.bundle.js, serves this page on localhost:9970 
 
 then open `http://localhost:9970/test/`, the results show on the page and in the console.
 
-- the page is device a. it opens 2 ports into one vault worker, thats what 2 browser tabs do, so "2 tabs" in the checks means 2 ports
-- device b is an iframe on `localhost:9971`, another origin, so it has its own storage like another device. it only does what device a asks it to with `postMessage`
-- every run uses its own vault (`identity-test-<run>`), the vaults of older runs get deleted first
+- the page only runs the tests. every tab of a device is an iframe on that devices origin, it gives the page a port into its vault worker and the page drives that vault with `remote`. device a is `localhost:9970` with 2 tab iframes that share one vault worker, like 2 browser tabs, device b is `localhost:9971`, another origin, so its own storage like another device
+- closing a tab is removing its iframe, the worker sees it close like a closed browser tab
+- every run uses its own vault (`identity-test-<run>`), a tab deletes the vaults of older runs first
 
-it checks: a seed makes a vault and shows the seed phrase once, tab 2 gets the vault tab 1 made, a value tab 1 puts is read by tab 2 and its audit entry has the bee length (`meta.views`), the user key is in the vault and the seed phrase isnt saved, both tabs share one news app and see each others posts, a wrong verification code is refused, device b pairs, posts (also a 40KB one) reach device b, and a value device b puts reaches device a
+it checks: a seed makes a vault and shows the seed phrase once, tab 2 gets the vault tab 1 made, a value tab 1 puts is read by tab 2 and its audit entry has the bee length (`meta.views`), the user key is in the vault and the seed phrase isnt saved, both tabs share one news app and see each others posts, a wrong verification code is refused, device b pairs and can write right away (it used to throw Not writable), posts (also a 40KB one) reach device b, a value device b puts reaches device a, and after device a's webrtc tab closes a post from its other tab still reaches device b
