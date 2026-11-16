@@ -59,21 +59,21 @@ async function run_tests (run) {
   // a freshly paired device used to write before it was a writer and throw Not writable
   const wrote = await b.vault_put('test/from-b', { device: 'b' }).then(() => true, err => err.message)
   check('device b can write right after pairing', wrote === true, wrote)
-  const [app] = await wait_for(async () => { const apps = await b.list_apps(); return apps?.length && apps }, 60000)
+  const [app] = await wait_for(b, async () => { const apps = await b.list_apps(); return apps?.length && apps })
   b.session_set_joined_app(app.id)
   b.complete_authentication()
   const news_b = (await b.open_app(app.id, 'ali')).news_app()
   await news_b.init_blog({ username: 'ali' })
-  const seen = await wait_for(async () => { const list = await news_b.get_my_posts(); return list.length >= 2 && list.map(post => post.title) }, 90000).catch(() => [])
+  const seen = await wait_for(news_b, async () => { const list = await news_b.get_my_posts(); return list.length >= 2 && list.map(post => post.title) })
   check('device b pairs and gets the posts of device a', seen.length > 0)
   check('a post from device a shows on device b', seen.some(title => title === 'hello from a'), seen.join())
   check('a 40KB post reaches device b too (its webrtc messages go in pieces)', seen.some(title => title === 'big post from a'), seen.join())
-  const from_b = await wait_for(() => tab2.vault_get('test/from-b'), 60000).catch(() => null)
+  const from_b = await wait_for(tab2, () => tab2.vault_get('test/from-b'))
   check('device b is a writer too, a value it puts reaches device a', from_b?.device === 'b')
   // tab 1 does the webrtc for device a. when it closes, its connections close, tab 2 takes over and the devices connect again
   tab1.close_tab()
   await news2.create_post('after tab 1 closed', 'web test')
-  const later = await wait_for(async () => (await news_b.get_my_posts()).some(post => post.title === 'after tab 1 closed'), 90000).catch(() => false)
+  const later = await wait_for(news_b, async () => (await news_b.get_my_posts()).some(post => post.title === 'after tab 1 closed'))
   check('after the webrtc tab of device a closed, a post from its other tab still reaches device b', later)
 }
 
@@ -106,13 +106,14 @@ function serve_tab (run) {
   })
 }
 
-async function wait_for (fn, ms) {
-  for (const until = Date.now() + ms; Date.now() < until;) {
-    const value = await fn()
-    if (value) return value
-    await new Promise(resolve => setTimeout(resolve, 500))
-  }
-  throw new Error('timed out')
+// checks fn() again on every update of source (a vault or a news app), gives its first value that isnt empty
+function wait_for (source, fn) {
+  return new Promise((resolve, reject) => {
+    let done = false
+    const check = () => done || Promise.resolve(fn()).then(value => { if (value && !done) { done = true; resolve(value) } }, reject)
+    source.on_update(check) // stays subscribed, theres no off, done makes later updates do nothing
+    check()
+  })
 }
 
 // folders of older runs, a folder still open in another tab is locked and stays
