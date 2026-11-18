@@ -1,4 +1,4 @@
-// checks what pins what in autobase 6.5.13 (what we use), for docs/autobase-pinning.md
+// checks what pins what in autobase, for docs/autobase-pinning.md. ran on 6.5.13 first, now on autobase 7 (views are the signed cores, signedLength)
 // plain autobase, 1 then 2 devices, a view that is just a list of entries
 
 const path = require('path')
@@ -22,9 +22,10 @@ async function main () {
   const first = await a.system.getIndexedInfo()
   console.log(`1. the system view stores per view only: ${Object.keys(first.views[0]).join(', ')}`)
   const view_1 = signed_core(a)
+  const key_1 = b4a.from(view_1.key) // on autobase 7 base.view gets the new key in place, so keep a copy
   const hash_3 = hex(await view_1.treeHash(3))
-  const system_length_1 = a.system.core.getBackingCore().session.length
-  console.log(`2. one device: view ${short(view_1.key)} length ${view_1.length} fork ${view_1.fork}, hash at 3 ${short(hash_3)}`)
+  const system_length_1 = a.core.signedLength
+  console.log(`2. one device: view ${short(view_1.key)} signed length ${view_1.signedLength} fork ${view_1.fork}, hash at 3 ${short(hash_3)}`)
   // b joins and becomes an indexer
   const b = make_base(store_b, a.key)
   await b.ready()
@@ -36,7 +37,7 @@ async function main () {
   await wait_signed([a, b], 5)
   const view_2 = signed_core(a)
   const prologue = view_2.manifest.prologue
-  console.log(`3. b became an indexer: the view key changed ${short(view_1.key)} -> ${short(view_2.key)}: ${!b4a.equals(view_1.key, view_2.key)}`)
+  console.log(`3. b became an indexer: the view key changed ${short(key_1)} -> ${short(view_2.key)}: ${!b4a.equals(key_1, view_2.key)}`)
   console.log(`   the new core starts with a prologue of the old data: length ${prologue.length}, and its hash at 3 is the same: ${hex(await view_2.treeHash(3)) === hash_3}`)
   console.log(`   b has the same view key: ${b4a.equals(signed_core(b).key, view_2.key)}`)
   // both write at the same moment, so autobase has to reorder
@@ -57,9 +58,9 @@ async function main () {
   const signed_b = signed_core(b)
   console.log(`4. both wrote at the same time (${offline ? 'offline' : 'connected'}): the in memory view fork went a ${forks_before[0]} -> ${a.view.fork}, b ${forks_before[1]} -> ${b.view.fork}`)
   console.log(`   the signed view core stayed fork a ${signed_a.fork} b ${signed_b.fork}, same hash at 13 on both: ${hex(await signed_a.treeHash(13)) === hex(await signed_b.treeHash(13))}, hash at 3 still the same: ${hex(await signed_a.treeHash(3)) === hash_3}`)
-  const system_a = a.system.core.getBackingCore().session
-  const system_b = b.system.core.getBackingCore().session
-  const system_length = Math.min(system_a.length, system_b.length)
+  const system_a = a.core
+  const system_b = b.core
+  const system_length = Math.min(system_a.signedLength, system_b.signedLength)
   console.log(`5. the system core is fork a ${system_a.fork} b ${system_b.fork}, same hash at ${system_length} on both: ${hex(await system_a.treeHash(system_length)) === hex(await system_b.treeHash(system_length))}`)
   const then = await a.system.getIndexedInfo(system_length_1)
   const now = await a.system.getIndexedInfo()
@@ -86,8 +87,8 @@ async function apply (nodes, view, host) {
   }
 }
 
-// the real hypercore behind the view, it only ever holds signed blocks
-function signed_core (base) { return base.view.getBackingCore().session }
+// on autobase 7 the view is the signed core itself, everything up to its signedLength is signed
+function signed_core (base) { return base.view }
 
 function connect (store_a, store_b) {
   const stream_a = store_a.replicate(true)
