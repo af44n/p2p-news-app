@@ -12,7 +12,7 @@ serapath wants the way apps use the datashell process to be the same in the brow
 ## our browser vault (`lib/vault-worker.js`, see `lib/README.md`)
 
 - the vault worker is the process (a SharedWorker, or a dedicated worker without one). it owns the opfs storage and every tab talks to it over its own port
-- the api is the whole identity object. `remote` sends `{ ref, path, args }` calls in our `{ head, refs, type, data, meta }` format and gives the page live stand ins for objects that stay in the worker (the vault bee, watchers), and callbacks the worker can await (`on_seed_phrase`)
+- the api is the whole identity object. `daemon` (was `remote`) sends `{ ref, path, args }` calls in our `{ head, refs, type, data, meta }` format and gives the page live stand ins for objects that stay in the worker (the vault bee, watchers), and callbacks the worker can await (`on_seed_phrase`)
 - on the cli there is no process yet, `lib/datashell.js` opens identity in the same process as the command
 
 ## what is different
@@ -26,7 +26,7 @@ serapath wants the way apps use the datashell process to be the same in the brow
 
 1. one api shape for both, namespaces with named actions: basims `pkg`, `cap`, `bot`, and ours as `vault` (`put`, `get`, `del`, `watch`), `pair`, `apps`. live objects only where an action needs them (`watch` streams like his `line`)
 2. one message format, our `{ head, refs, type, data, meta }`, `type` = `kind.action`, `data` = args, the answer points back with `refs.cause`. his socket.js stays (one json per line), only the fields change
-3. on the cli the vault runs inside his daemon as one more namespace, in the browser the vault worker serves the same namespaces, so an app gets the same api from `remote` on both
+3. on the cli the vault runs inside his daemon as one more namespace, in the browser the vault worker serves the same namespaces, so an app gets the same api from `daemon` on both
 4. callbacks become actions the other side answers (e.g. the daemon asks `seed.confirm` and the command answers), so the format stays plain json
 
 questions for basim: is the `kind.action` type ok with u, and should the vault namespace live in runtime.js or in a module the daemon loads?

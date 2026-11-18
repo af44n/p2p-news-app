@@ -2,9 +2,9 @@
 // run with: npm run relay, then npm run test:web and open http://localhost:9970/test/ (chrome, firefox, safari)
 // this page only runs the tests. every tab of a device is an iframe that gives this page a port into its vault worker,
 // device a on localhost:9970, device b on localhost:9971 (another origin, so its own storage, like another device).
-// this page drives both vaults with remote, closing a tab is removing its iframe. results go to the page and the console
+// this page drives both vaults with daemon.connect, closing a tab is removing its iframe. results go to the page and the console
 // every run uses its own vault folder (identity-test-<run>) and worker, a tab deletes the folders of older runs first
-const remote = require('../lib/node_modules/remote')
+const daemon = require('../lib/node_modules/daemon')
 const serve_webrtc = require('../lib/node_modules/webrtc-bridge/page')
 
 const [role, run] = location.hash.slice(1).split(':')
@@ -91,7 +91,7 @@ async function open_tab (origin, run) {
   port1.postMessage({ type: 'start', data: { storage: {}, input: { name: `test-${run}` }, tab } })
   frame.contentWindow.postMessage({ type: 'tab', tab }, '*', [port2])
   serve_webrtc(port1)
-  return remote(port1, { close_tab: () => frame.remove() })
+  return daemon.connect(port1, { close_tab: () => frame.remove() })
 }
 
 // in the tab iframe. it holds the tab lock while it lives, so the worker sees the tab close when the iframe is removed

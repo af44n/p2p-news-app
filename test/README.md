@@ -9,7 +9,7 @@ npm run test:web   # builds vault.bundle.js, serves this page on localhost:9970 
 
 then open `http://localhost:9970/test/`, the results show on the page and in the console.
 
-- the page only runs the tests. every tab of a device is an iframe on that devices origin, it gives the page a port into its vault worker and the page drives that vault with `remote`. device a is `localhost:9970` with 2 tab iframes that share one vault worker, like 2 browser tabs, device b is `localhost:9971`, another origin, so its own storage like another device
+- the page only runs the tests. every tab of a device is an iframe on that devices origin, it gives the page a port into its vault worker and the page drives that vault with `daemon.connect`. device a is `localhost:9970` with 2 tab iframes that share one vault worker, like 2 browser tabs, device b is `localhost:9971`, another origin, so its own storage like another device
 - closing a tab is removing its iframe, the worker sees it close like a closed browser tab
 - every run uses its own vault (`identity-test-<run>`), a tab deletes the vaults of older runs first
 
