@@ -1,15 +1,16 @@
 // vault tests in a real browser, the vault runs in its SharedWorker (lib/vault-worker.js) like in the app
-// run with: npm run relay, then npm run test:web and open http://localhost:9970/test/ (chrome, firefox, safari)
+// run with: npm run relay, then npm run test:web and open http://datashell.localhost:9970/test/ (chrome, firefox, safari)
 // this page only runs the tests. every tab of a device is an iframe that gives this page a port into its vault worker,
-// device a on localhost:9970, device b on localhost:9971 (another origin, so its own storage, like another device).
+// device a on box1.datashell.localhost, device b on box2.datashell.localhost (another origin, so its own storage, like another device).
 // this page drives both vaults with daemon.connect, closing a tab is removing its iframe. results go to the page and the console
 // every run uses its own vault folder (identity-test-<run>) and worker, a tab deletes the folders of older runs first
 const daemon = require('../lib/node_modules/daemon')
 const serve_webrtc = require('../lib/node_modules/webrtc-bridge/page')
 
 const [role, run] = location.hash.slice(1).split(':')
-const A = 'http://localhost:9970'
-const B = 'http://localhost:9971'
+// each device is its own subdomain of localhost, so its own origin and storage, but its one server
+const A = 'http://box1.datashell.localhost:9970'
+const B = 'http://box2.datashell.localhost:9970'
 const state = { failed: 0, checks: 0 }
 
 if (role === 'tab') serve_tab(run)
