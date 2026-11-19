@@ -6,6 +6,7 @@
 // every run uses its own vault folder (identity-test-<run>) and worker, a tab deletes the folders of older runs first
 const daemon = require('../lib/node_modules/daemon')
 const serve_webrtc = require('../lib/node_modules/webrtc-bridge/page')
+const { make_tx } = require('../lib/node_modules/iframe-runtime')
 
 const [role, run] = location.hash.slice(1).split(':')
 // each device is its own subdomain of localhost, so its own origin and storage, but its one server
@@ -89,10 +90,10 @@ async function open_tab (origin, run) {
   await new Promise(resolve => { frame.onload = resolve; document.body.append(frame) })
   const { port1, port2 } = new MessageChannel()
   const tab = Math.random().toString(36).slice(2)
-  port1.postMessage({ type: 'start', data: { storage: {}, input: { name: `test-${run}` }, tab } })
-  frame.contentWindow.postMessage({ type: 'tab', tab }, '*', [port2])
+  const tx = make_tx('page')
+  frame.contentWindow.postMessage(tx({ to: 'vault', type: 'tab', data: { storage: {}, input: { name: `test-${run}` }, tab } }), '*', [port2])
   serve_webrtc(port1)
-  return daemon.connect(port1, { close_tab: () => frame.remove() })
+  return daemon.connect(port1, { close_tab: () => frame.remove() }, tx)
 }
 
 // in the tab iframe. it holds the tab lock while it lives, so the worker sees the tab close when the iframe is removed
@@ -100,8 +101,8 @@ function serve_tab (run) {
   delete_old_runs(run)
   addEventListener('message', e => {
     if (e.data?.type !== 'tab') return
-    navigator.locks.request(`datashell-tab-${e.data.tab}`, () => {
-      new SharedWorker('/vault.bundle.js', { name: `test-${run}` }).port.postMessage({ type: 'tab' }, [e.ports[0]])
+    navigator.locks.request(`datashell-tab-${e.data.data.tab}`, () => {
+      new SharedWorker('/vault.bundle.js', { name: `test-${run}` }).port.postMessage(e.data, [e.ports[0]])
       return new Promise(() => {})
     })
   })
