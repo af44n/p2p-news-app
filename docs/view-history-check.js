@@ -1,5 +1,5 @@
 // what happens to the view and system cores over time (questions from the worklog-45 review)
-// plain autobase, a alone then a + b as indexers, results in docs/autobase-checks.md
+// plain autobase 7, a alone then a + b as indexers, results in docs/autobase-checks.md
 // run with: node docs/view-history-check.js
 // 1. new indexer = new view / system key, but the length keeps going from a prologue and old hashes stay the same
 // 2. the prologue is { hash, length } of the data, not the old key or manifest
@@ -26,9 +26,10 @@ async function main () {
   await a.ready()
   for (let i = 0; i < 3; i++) await a.append('a' + i)
   await wait_signed([a], 3)
-  const before = { view: signed_core(a), system: system_core(a) }
-  const lengths = { view: before.view.length, system: before.system.length }
-  const hashes = { view: hex(await before.view.treeHash(lengths.view)), system: hex(await before.system.treeHash(lengths.system)) }
+  // on autobase 7 base.view and base.core (the system) get the new key in place, so keep copies of the old keys
+  const before = { view: { key: b4a.from(a.view.key) }, system: { key: b4a.from(a.core.key) } }
+  const lengths = { view: a.view.signedLength, system: a.core.signedLength }
+  const hashes = { view: hex(await a.view.treeHash(lengths.view)), system: hex(await a.core.treeHash(lengths.system)) }
   // b joins and becomes an indexer, so the view and system get new keys
   const b = make_base(store_b, a.key)
   await b.ready()
@@ -37,9 +38,9 @@ async function main () {
   await wait_for(() => b.isIndexer, [a, b])
   await a.append('a3')
   await wait_signed([a, b], 5)
-  const after = { view: signed_core(a), system: system_core(a) }
+  const after = { view: a.view, system: a.core }
   console.log(`a alone: view core ${short(before.view.key)} length ${lengths.view}, system core ${short(before.system.key)} length ${lengths.system}`)
-  console.log(`b became an indexer: view core ${short(after.view.key)} length ${after.view.length}, system core ${short(after.system.key)} length ${after.system.length}`)
+  console.log(`b became an indexer: view core ${short(after.view.key)} length ${after.view.signedLength}, system core ${short(after.system.key)} length ${after.system.signedLength}`)
   // 1.
   for (const name of ['view', 'system']) {
     const core = after[name]
@@ -58,7 +59,7 @@ async function main () {
   const rows = { info: [], checkout: [], block: [] }
   let matches = true
   // length 1 is only the hyperbee header (block 0), so start at 2
-  for (let length = 2; length < system.length; length++) {
+  for (let length = 2; length < system.signedLength; length++) {
     // autobase writes the info entry under the key 0x00 0x00 'info' (DIGEST sub encoding in autobase lib/system.js),
     // the member entries in between start with 0x01
     const is_info = await a.system.db.getBySeq(length - 1).then(node => hex(node.key) === INFO_KEY)
@@ -69,7 +70,7 @@ async function main () {
     rows.checkout.push(checkout_works ? 'y' : 'x')
     if (info_works !== is_info || checkout_works !== is_info) matches = false
   }
-  console.log(`   system lengths 2..${system.length - 1} (i = block length - 1 is the info entry, y = works, x = throws)`)
+  console.log(`   system lengths 2..${system.signedLength - 1} (i = block length - 1 is the info entry, y = works, x = throws)`)
   console.log(`   info entry at block length - 1: ${rows.block.join(' ')}`)
   console.log(`   getIndexedInfo(length):        ${rows.info.join(' ')}`)
   console.log(`   system.checkout(length):       ${rows.checkout.join(' ')}`)
@@ -84,7 +85,7 @@ async function main () {
   const someone = crypto.keyPair()
   const copy = store_b.get({ manifest: { version: 1, signers: [{ publicKey: someone.publicKey }], prologue: { hash: await original.treeHash(3), length: 3 } }, keyPair: someone })
   await copy.ready()
-  await copy.core.copyPrologue(original.core)
+  await copy.core.copyPrologue(original.state)
   await copy.append('four, written by someone else')
   const same_start = hex(await copy.treeHash(3)) === hex(await original.treeHash(3))
   show(`4. a core with someone elses keypair and the original's prologue: key ${short(copy.key)} vs ${short(original.key)}, length ${copy.length}, same hash at 3: ${same_start}, block 0 is '${b4a.toString(await copy.get(0))}'`, same_start && !b4a.equals(copy.key, original.key) && copy.length === 4)
@@ -106,10 +107,6 @@ async function apply (nodes, view, host) {
     else await view.append(node.value)
   }
 }
-
-// the real hypercores behind the view and the system, they only ever hold signed blocks
-function signed_core (base) { return base.view.getBackingCore().session }
-function system_core (base) { return base.system.core.getBackingCore().session }
 
 async function close_and_true (system) {
   await system.close()

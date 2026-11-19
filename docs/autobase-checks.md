@@ -4,7 +4,7 @@ u said every test should be a file with resutls and what they mean, so we build 
 
 all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, not rerun on the latest ones yet), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
 
-**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `view-history-check`, `pin-check`, `indexer-offline-check` and `pin-hang-check` read the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
+**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check` and `view-history-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `pin-check`, `indexer-offline-check` and `pin-hang-check` read the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
 
 ## fork is always 0
 
@@ -23,7 +23,7 @@ so always 0, just that the "never" comes from nobody being able to truncate the 
 
 `node docs/view-history-check.js` 
 
-- when b becomes an indexer the view and system cores get new keys, but the lenght doesnt start at 0. the new view core starts with a prologue of length 4 (it was at 3), the system core with 15 (it was at 8), and the hash at the old lengths is the same on the new cores
+- when b becomes an indexer the view and system cores get new keys, but the lenght doesnt start at 0. the new view core starts with a prologue of length 4 (it was at 3), the system core with 15 (it was at 8), and the hash at the old lengths is the same on the new cores. on autobase 7 the same, the view prologue is 3 (it was at 3) and the system 12 (it was at 7)
 - the prologue is `{ hash, length }`, and the hash is the tree hash of the data at that length. its not the old key; (a core key is the hash of its manifest, so its not the old manifest either). nothing in the new core points to the old key
 - `getIndexedInfo(length)` and `system.checkout(length)` work exactly where system block `length - 1` is the `info` entry (autobase writes a few member entries and then one info entry on every flush), everwhere else they throw. i didnt find a field pointing back to the previous info entry, but jumping back to the last info entry always works
 - someone with their own keypair can make a core with another cores prologue, copy its first 3 blocks and append their own. new key, same hash at 3. so a prologue only proves "my start is that data", not "im the real continuaton", only the autobase key and its indexers say that
