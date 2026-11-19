@@ -1,8 +1,9 @@
 // serapath's idea for recovery when every device is lost: a plain hypercore made with the seed phrase keypair (the
 // "master core"). every message (the first device's vault, later a restore) truncates to the current length with
-// a new fork id, max(date in ms, last fork + 1), and appends one message, then the keypair is dropped again. a higher
-// fork wins, so an old copy of the core that comes back later gets truncated to the new one, also when the clock of
-// the restoring device is behind
+// a new fork id (the date in ms) and appends one message, then the keypair is dropped again. a higher fork wins, so an
+// old copy of the core that comes back later gets truncated to the new one. if the date isnt after the last fork (the
+// clock is behind, or the last restore had a clock far ahead) the user is asked: stop and fix the clock, or go on with
+// last fork + 1
 // devices here, ali (the first device, lost later), a backup that only replicates, and a new device after the loss
 // plain hypercore 11 + corestore 7, not our vault code. run with: node docs/master-core-check.js
 const fs = require('fs')
@@ -65,21 +66,26 @@ async function main () {
   streams = connect(other, backup)
   await wait(() => other_core.fork === current && other_core.length === 2, [other_core])
   streams.forEach(stream => stream.destroy())
-  const lower = await write(other_core, { vault: 'v4' }, keypair, current - 3600 * 1000).then(() => 'allowed', err => err.message.split('\n')[0])
-  console.log(`info, a restore with an older date on a device that has the newer fork: ${lower}`)
+  const asked = []
+  const written = await write(other_core, { vault: 'v4' }, keypair, current - 3600 * 1000, fork => { asked.push(fork); return false })
+  check('a restore whose date isnt after the last fork asks the user first, if they stop nothing is written', !written && asked[0] === current + 1 && other_core.fork === current && other_core.length === 2)
+  await write(other_core, { vault: 'v4' }, keypair, current - 3600 * 1000, () => true)
   streams = connect(other, backup)
   await wait(() => backup_core.fork !== current, [backup_core], 5000)
-  check('a restore on a device whose clock is behind still gets a higher fork (last fork + 1) and replaces the old one on the backup', backup_core.fork === current + 1 && (await backup_core.get(2, { wait: true, timeout: 5000 }).catch(() => null))?.vault === 'v4', `backup fork ${backup_core.fork}`)
+  check('if they go on, the restore gets last fork + 1 and replaces the old one on the backup', backup_core.fork === current + 1 && (await backup_core.get(2, { wait: true, timeout: 5000 }).catch(() => null))?.vault === 'v4', `backup fork ${backup_core.fork}`)
   streams.forEach(stream => stream.destroy())
   await other.close()
   for (const store of [ali, backup, fresh]) await store.close()
   fs.rmSync(root, { recursive: true, force: true })
 }
 
-// one message: truncate to the current length with a new fork id, the date (ms) or last fork + 1 if the date isnt higher, then append
-async function write (core, message, keyPair, date) {
+// one message: truncate to the current length with a new fork id, the date (ms), then append. if the date isnt after the
+// last fork, ask(last fork + 1) is the user deciding, false stops (nothing written), true goes on with last fork + 1
+async function write (core, message, keyPair, date, ask) {
+  if (core.fork + 1 > date && !(await ask(core.fork + 1))) return false
   await core.truncate(core.length, { fork: Math.max(date, core.fork + 1), keyPair })
   await core.append(message, { keyPair })
+  return true
 }
 
 function connect (store_a, store_b) {
