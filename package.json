@@ -112,7 +112,8 @@
     "browserify": "^17.0.0",
     "budo": "^11.8.4",
     "patch-package": "^8.0.0",
-    "standardx": "^7.0.0"
+    "standardx": "^7.0.0",
+    "streamx": "^2.28.1"
   },
   "overrides": {
     "mirror-drive": "1.10.0",
