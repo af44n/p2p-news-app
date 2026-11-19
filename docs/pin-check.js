@@ -1,5 +1,5 @@
 // does a packs pin() link (dat://<length>.<fork>.<autobase key>.<hash> of the db view) surive an indexer change?
-// our packs + autodisk + autobee, 2 devices, results in docs/autobase-checks.md
+// our packs + autodisk + automap on autobase 7, 2 devices, results in docs/autobase-checks.md
 // run with: bare docs/pin-check.js
 // 1. a pins alone, b becomes an indexer, the db view gets a new key
 // 2. the old link still works on a and b, by autobase key + current signed db core + checkout(length)
@@ -79,8 +79,8 @@ async function make_vault (store) {
   return { store, get_vault_bee: () => bee, vault_put: (k, v) => bee.put(k, v), vault_get: async k => (await bee.get(k))?.value || null, vault_del: k => bee.del(k) }
 }
 
-// the real hypercore behind the disks db view (the file list), it only ever holds signed blocks
-function signed_core (disk) { return disk.base.view.drive.core.getBackingCore().session }
+// the disks db view (the file list). on autobase 7 the view is the signed core itself, up to its signedLength
+function signed_core (disk) { return disk.base.view.drive.core }
 
 function connect (store_a, store_b) {
   const stream_a = store_a.replicate(true)
@@ -98,12 +98,13 @@ async function wait_for (done, disks) {
   throw new Error('timed out')
 }
 
-// with 2 indexers the newest entries only get signed once more entries come in, so it keeps writing a small file
+// with 2 indexers the newest entries only get signed once more entries come in, so it keeps writing a small file.
+// on autobase 7 a and b take turns, ticks from a alone often didnt get anything signed for 40s
 async function wait_signed (disks, length) {
   for (let i = 0; i < 400; i++) {
     for (const disk of disks) await disk.base.update()
-    if (disks.every(disk => signed_core(disk).length >= length)) return
-    if (i % 10 === 9) await disks[0].put('/tick.txt', b4a.from(String(i)))
+    if (disks.every(disk => signed_core(disk).signedLength >= length)) return
+    if (i % 10 === 9) await disks[(i + 1) / 10 % disks.length].put('/tick.txt', b4a.from(String(i)))
     await sleep(100)
   }
   throw new Error('not signed')

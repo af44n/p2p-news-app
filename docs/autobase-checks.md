@@ -4,7 +4,7 @@ u said every test should be a file with resutls and what they mean, so we build 
 
 all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, not rerun on the latest ones yet), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
 
-**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check` and `view-history-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `pin-check`, `indexer-offline-check` and `pin-hang-check` read the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
+**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check`, `view-history-check` and `pin-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `indexer-offline-check` and `pin-hang-check` read the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
 
 ## fork is always 0
 
@@ -32,7 +32,7 @@ so always 0, just that the "never" comes from nobody being able to truncate the 
 
 `bare docs/pin-check.js` (ours, packs + autodisk + autobee, 2 devices)
 
-- a pins a pack alone (`dat://2.0.<autobase key>.<hash>`), then b becomes an indexer and the db view gets a new key with a prologue of length 4
+- a pins a pack alone (`dat://2.0.<autobase key>.<hash>`), then b becomes an indexer and the db view gets a new key with a prologue of length 4 (on autobase 7 of length 2, the pinned length)
 - the old link still works on a and on b, (b never saw the old view key). open the disk by the autobase key from the link, take its current signed db core, the hash at length 2 matches the link, checkout(2) runs the old code, latest runs the new code
 - the hash at another length doesnt match the link
 
