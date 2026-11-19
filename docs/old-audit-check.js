@@ -1,6 +1,7 @@
 // what happens to an old audit log when the new auditcore (real view, 17891e3) opens it? results in docs/autobase-checks.md
 // run with: node docs/old-audit-check.js (inside the repo, the old auditcore comes from git)
-// 1. the old auditcore writes 3 entires
+// 1. the old auditcore writes 3 entires. on autobase 7 its own read() shows 0, its entries live in a plain js array in the
+//    view, and autobase 7 calls open more than once, so apply pushes into another object than base.view
 // 2. the new one on the same storage shows 0 (i think cuz autobase doesnt apply them again, didnt check that part)
 // 3. the old entries are still in the devices input core
 // 4. new entries show up fine
@@ -26,7 +27,8 @@ async function main () {
   await old_log.ready()
   for (let i = 0; i < 3; i++) await old_log.append({ type: 'put', data: { key: 'k' + i } })
   const old_entries = (await old_log.read()).length
-  show(`1. the old auditcore (${OLD_COMMIT}) wrote ${old_entries} entries`, old_entries === 3)
+  const old_written = old_log.base.local.length
+  show(`1. the old auditcore (${OLD_COMMIT}) wrote ${old_written} entries into its input core, its own read() shows ${old_entries} on autobase 7`, old_written === 3 && old_entries === 0)
   const key = old_log.key
   await old_log.close()
   await store.close()

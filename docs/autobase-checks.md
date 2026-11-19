@@ -2,9 +2,9 @@
 
 u said every test should be a file with resutls and what they mean, so we build up a common understanding and basim and others can build on it. so here are all the checks behind what i told u in the worklog-43 44 and 45 threads. each script prints `ok` or `NOT ok` per claim with the values it saw, and exits with 1 if something isnt ok.. the comments at the top of each script explian the claim and where in the autobase / hypercore code it comes from.
 
-all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, not rerun on the latest ones yet), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
+all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, rerun on the latest ones since, see below), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
 
-**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check`, `view-history-check`, `pin-check`, `indexer-offline-check` and `pin-hang-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so its results below are still the autobase 6 ones, it needs to be checked again on 7, not just renamed
+**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check`, `view-history-check`, `pin-check`, `indexer-offline-check`, `pin-hang-check` and `old-audit-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass, so every check runs on 7 now. where 7 differs it says so in the section
 
 ## fork is always 0
 
@@ -70,6 +70,8 @@ on autobase 7 the same check gets everything signed within 3 to 5 seconds withou
 
 - the old auditcore writes 3 entries, the new one opens the same storgae and shows 0, new entries show up fine
 - the 3 old entries are still there, in the devices own input core
+
+on autobase 7 the new auditcore shows 0 too and the 3 entries are still in the input core. the old auditcore cant even show its own entries there, they were a plain js array in the view, and autobase 7 calls `open` more than once (for `base.view` and for apply, `index.js:205` and `lib/apply-state.js:440`), so apply pushes into another object than `base.view`. checked with a small script, open ran 3 times
 
 thats what i meant with, "old local vaults lose their old log entries". i think its cuz autobase already applied those entries once and doesnt run apply again for them, nothing is released, so no migration
 
