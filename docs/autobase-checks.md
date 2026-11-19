@@ -4,7 +4,7 @@ u said every test should be a file with resutls and what they mean, so we build 
 
 all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, not rerun on the latest ones yet), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
 
-**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check`, `view-history-check` and `pin-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `indexer-offline-check` and `pin-hang-check` read the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
+**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check`, `view-history-check`, `pin-check` and `indexer-offline-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `pin-hang-check` reads the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
 
 ## fork is always 0
 
@@ -49,6 +49,8 @@ so u dont have to go through old manfiests to find the length, a new view core k
 - a and b are indexers and thats signed (view core with 2 signers, quorum 2), then b goes offline
 - a adds c as an indexer. c already thinks its an indexer and can write, a has 11 entries in its view, but the signed length stays at 1 and the signed indexer list at 2 for the whole 10 secnods
 - when b is back, c becomes the 3rd signed indexer and signing goes on (17 of 18)
+
+on autobase 7 the same, only that c.isIndexer stays false while b is away (it only turns true once c is in the indexers autobase applied, `_setLocalIndexer` in autobase index.js), c can still write, and the signed view length was 0 there instead of 1
 
 so with 2 indexers adding a 3rd needs both of them,, and if one is gone for good the one left cant fix it alone. also good to know for recovery, `isIndexer` and `writable` on a device dont mean its signed yet. autobase 6.5.13 has no optimistic writes
 

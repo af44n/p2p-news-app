@@ -1,8 +1,8 @@
 // with 2 indexers and one ofline, can the one left add a 3rd device and keep going?
-// plain autobase, 3 devices, results in docs/autobase-checks.md
+// plain autobase 7, 3 devices, results in docs/autobase-checks.md
 // run with: node docs/indexer-offline-check.js
 // 1. a + b are signed indexers, then b goes offline
-// 2. a adds c, c thinks its an indexer and can write, but nothing gets signed while b is away
+// 2. a adds c, c can write, but nothing gets signed while b is away (on autobase 7 c.isIndexer stays false till then)
 // 3. b comes back, c becomes the 3rd signed indexer and signing goes on
 
 const path = require('path')
@@ -41,7 +41,7 @@ async function main () {
   await keep_going([a, c], 100)
   const c_wrote = await c.append('from c').then(() => true, () => false)
   const during = await signed_state(a)
-  show(`2. b offline for 10s: c thinks its an indexer (${c.isIndexer}) and could write (${c_wrote}), a has ${a.view.length} entries in its view, but signed is still ${during.length} with ${during.indexers} signed indexers`, during.length === before.length && during.indexers === 2)
+  show(`2. b offline for 10s: c.isIndexer is ${c.isIndexer}, c could write (${c_wrote}), a has ${a.view.length} entries in its view, but signed is still ${during.length} with ${during.indexers} signed indexers`, during.length === before.length && during.indexers === 2)
   // 3. b comes back
   streams_ab = connect(store_a, store_b)
   await keep_going([a, b, c], 60)
@@ -66,8 +66,8 @@ async function apply (nodes, view, host) {
   }
 }
 
-// the real hypercore behind the view, it only ever holds signed blocks
-function signed_core (base) { return base.view.getBackingCore().session }
+// on autobase 7 the view is the signed core itself, its manifest lists the indexers that sign it
+function signed_core (base) { return base.view }
 
 // what is signed right now: the signed view length and how many indexers the signed system state lists
 async function signed_state (base) {
