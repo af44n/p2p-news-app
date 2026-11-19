@@ -4,7 +4,7 @@ u said every test should be a file with resutls and what they mean, so we build 
 
 all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, not rerun on the latest ones yet), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
 
-**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check`, `view-history-check`, `pin-check` and `indexer-offline-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `pin-hang-check` reads the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
+**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check`, `view-history-check`, `pin-check`, `indexer-offline-check` and `pin-hang-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so its results below are still the autobase 6 ones, it needs to be checked again on 7, not just renamed
 
 ## fork is always 0
 
@@ -60,7 +60,9 @@ so with 2 indexers adding a 3rd needs both of them,, and if one is gone for good
 
 - b becomes an indexer, both write 4 times, then it waits like `pin()` does for 30 seconds without writing anything else. the signed db core stays at 4 of 9, so `pin()` would still be wating
 
-dont know the cause yet i look at the acks first? this check says `ok` while the hang is there, so it has to be flipped once `pin()` is fixed
+the cause is our own wait, `pin()` waits till the signed length reaches the current length, and on autobase 6 the newest entry only got signed once something newer came in (acking more didnt help, checked 19 oct)
+
+on autobase 7 the same check gets everything signed within 3 to 5 seconds without more writes (9 of 9, also when a writes last), so its flipped and says `ok` when `pin()` would finish. not explained yet, in `pin-check` a writing small files alone sometimes got nothing new signed for 40s, with a and b taking turns it was signed right away
 
 ## old audit logs after the auditcore change
 

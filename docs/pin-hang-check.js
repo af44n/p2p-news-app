@@ -1,8 +1,9 @@
-// with 2 indexers the wait in packs pin() can go on forver. our autodisk, 2 devices, results in docs/autobase-checks.md
+// with 2 indexers the wait in packs pin() could go on forver. our autodisk, 2 devices, results in docs/autobase-checks.md
 // run with: bare docs/pin-hang-check.js
-// says "ok" while the hang is there, flip it once pin() is fixed. cause not known yet, the acks are the first suspect
+// on autobase 6 the newest entry stayed unsigned till something newer came in, and pin() waits for all of them. on
+// autobase 7 they get signed within a few seconds without more writes, so this checks that pin() would finish
 // 1. b becomes an indexer
-// 2. both write 4 times, then wait like pin() for 30s without writing
+// 2. both write 4 times, then wait like pin() (at most 30s) without writing
 
 const fs = require('bare-fs')
 const process = require('bare-process')
@@ -34,11 +35,11 @@ async function main () {
     await a.put('/main.js', b4a.from('v' + i))
     await b.put('/other' + i + '.js', b4a.from('x'))
   }
-  const signed = a.base.view.drive.core.getBackingCore().session
+  const core = a.base.view.drive.core // on autobase 7 the view is the signed core itself, up to its signedLength
   const start = Date.now()
-  while (signed.length < a.base.view.drive.core.length && Date.now() - start < LIMIT) await update_both(a, b)
-  const waiting = signed.length < a.base.view.drive.core.length
-  show(`2. after ${Math.round((Date.now() - start) / 1000)}s the signed db core is at ${signed.length} of ${a.base.view.drive.core.length}, so pin() ${waiting ? 'would still be waiting' : 'would finish'}`, waiting)
+  while (core.signedLength < core.length && Date.now() - start < LIMIT) await update_both(a, b)
+  const waiting = core.signedLength < core.length
+  show(`2. after ${Math.round((Date.now() - start) / 1000)}s the signed db core is at ${core.signedLength} of ${core.length}, so pin() ${waiting ? 'would still be waiting' : 'would finish'}`, !waiting)
   for (const stream of streams) stream.destroy()
 }
 
