@@ -4,7 +4,7 @@ u said every test should be a file with resutls and what they mean, so we build 
 
 all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, corestore 6.18.4, not rerun on the latest ones yet), ran mutliple times same result each time, **plain autobase** means a small list view, not our vault code. **ours** means our real modules. **code** means i only read it in the code, no script.
 
-**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `fork-check`, `view-history-check`, `pin-check`, `indexer-offline-check` and `pin-hang-check` read the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed. first look: in `fork-check` with the view core itself, the view is on fork 2 after the reorder, so "fork is always 0" might not hold on 7
+**rerun on the latest modules (autobase 7, hypercore 11, corestore 7) on 17 nov:** `vault-bee-check` (ported), `pinning-check` (ported 18 nov), `fork-check` (ported 19 nov), `empty-block-check` (node and bare) and `master-core-check` pass. `view-history-check`, `pin-check`, `indexer-offline-check` and `pin-hang-check` read the separate signed core behind a view (`getBackingCore()`), autobase 7 doesnt have that anymore, its views are the signed hypercores themselves. `old-audit-check` runs the old auditcore, which writes nothing on autobase 7. so the results below are still the autobase 6 ones, they need to be checked again on 7, not just renamed
 
 ## fork is always 0
 
@@ -15,7 +15,9 @@ all run on the versions we had then (autobase 6.5.13, hypercore 10.38.2, coresto
 - the signed core of an autobase view has no keypair (2 signers quorum 2), so truncatng it gives `SESSION_NOT_WRITABLE`, and autobase only ever appends to it
 - when autobase reorders only the in memory view forks (went to 1 and 2), the signed view and system cores stayed 0
 
-so always 0, just that the "never" comes from nobody being able to truncate the signed core, not from a 0 in the code. autobase 7 has a real fork feature (`host.fork(indexers, system)`), that one is **code** only and not on our version
+on autobase 7 its the same for whats signed. the view is one hypercore now, its own state only has the signed blocks and stays on fork 0, the signature fails for fork 1 too. `base.view` is autobase's session over it, that one forks on every reorder and differently on each device (a 2, b 3), thats the fork i saw in the pinning check. truncating the session from code that has `base.view` works, the signed part stays as it is
+
+so always 0, just that the "never" comes from nobody being able to truncate the signed core, not from a 0 in the code. autobase 7 has a real fork feature (`host.fork(indexers, system)`), that one isnt in this check (the recovery checks in the latest modules repo used it)
 
 ## what happens to the view and system cores over time
 

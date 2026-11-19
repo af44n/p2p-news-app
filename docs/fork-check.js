@@ -1,9 +1,11 @@
-// is fork 0 hard coded in autobase? plain autobase, 2 indexers, results in docs/autobase-checks.md
+// is fork 0 hard coded in autobase? plain autobase 7, 2 indexers, results in docs/autobase-checks.md
 // run with: node docs/fork-check.js
+// on autobase 7 the view is one hypercore. its own state only holds what got signed, base.view is autobase's session
+// over it with its own fork (the one that moves on a reorder)
 // 1. the fork is part of what gets signed (treeSignable in hypercore lib/caps.js), so changing only the fork breaks the signatrue
 // 2. a normal single writer core can truncate and sign fork 1 fine
-// 3. the signed core of an autobase view has no keypair, so truncate is refused and autobase only appends to it
-// 4. after a reorder only the in memory view forks, the signed cores stay 0
+// 3. after a reorder only autobase's sessions fork, the signed view and system cores stay 0
+// 4. the signed view core has no keypair, so truncate is refused. truncating autobase's session leaves the signed part as it is
 
 const path = require('path')
 const os = require('os')
@@ -34,14 +36,13 @@ async function main () {
   }
   streams = connect(store_a, store_b)
   await wait_signed([a, b], 9)
-  const signed = signed_core(a)
-  const tree = signed.core.tree
-  console.log(`a's signed view core: length ${signed.length}, fork ${signed.fork}, ${signed.manifest.signers.length} signers, quorum ${signed.manifest.quorum}`)
+  const signed = signed_state(a.view)
+  console.log(`a's signed view core: length ${signed.length}, fork ${signed.fork}, ${a.view.manifest.signers.length} signers, quorum ${a.view.manifest.quorum}`)
   // 1. verify the indexers signature as it is, and again with only the fork changed to 1
-  const as_signed = signed.core.verifier.verify(tree.batch(), tree.signature)
-  const fork_1 = tree.batch()
+  const as_signed = a.view.core.verifier.verify(signed.createTreeBatch(), signed.signature)
+  const fork_1 = signed.createTreeBatch()
   fork_1.fork = 1
-  const as_fork_1 = signed.core.verifier.verify(fork_1, tree.signature)
+  const as_fork_1 = a.view.core.verifier.verify(fork_1, signed.signature)
   show(`1. the indexers signature verifies for fork 0 (${as_signed}) and fails for fork 1 (${as_fork_1})`, as_signed && !as_fork_1)
   // 2. a normal core with its own keypair can truncate and sign the new fork
   const plain = store_a.get({ name: 'plain' })
@@ -49,14 +50,19 @@ async function main () {
   await plain.append(['x', 'y', 'z'])
   await plain.truncate(1)
   await plain.append('w')
-  const plain_ok = plain.core.verifier.verify(plain.core.tree.batch(), plain.core.tree.signature)
+  const plain_ok = plain.core.verifier.verify(signed_state(plain).createTreeBatch(), signed_state(plain).signature)
   show(`2. a normal single writer core after truncate is on fork ${plain.fork}, length ${plain.length}, its own signature verifies: ${plain_ok}`, plain.fork === 1 && plain_ok)
-  // 3. try to truncate the signed view core of the autobase
-  const refused = await signed.truncate(signed.length - 1).then(() => 'truncated!', err => err.code || err.message)
-  show(`3. truncating the signed view core of the autobase: ${refused}, fork still ${signed.fork}`, refused === 'SESSION_NOT_WRITABLE' && signed.fork === 0)
-  // 4. the reorder above made the in memory views fork, the signed cores didnt
-  const forks = [signed_core(a).fork, signed_core(b).fork, system_core(a).fork, system_core(b).fork]
-  show(`4. after the reorder the in memory view fork is a ${a.view.fork} b ${b.view.fork}, signed view cores a ${forks[0]} b ${forks[1]}, system cores a ${forks[2]} b ${forks[3]}`, forks.every(fork => fork === 0))
+  // 3. the reorder above made autobase's sessions fork, the signed cores didnt
+  const forks = [signed_state(a.view).fork, signed_state(b.view).fork, signed_state(a.core).fork, signed_state(b.core).fork]
+  show(`3. after the reorder autobase's view session is on fork a ${a.view.fork} b ${b.view.fork}, signed view cores a ${forks[0]} b ${forks[1]}, system cores a ${forks[2]} b ${forks[3]}`, forks.every(fork => fork === 0))
+  // 4. try to truncate the signed view core (opened by its key), then autobase's own session of it
+  const outside = store_a.get({ key: a.view.key })
+  await outside.ready()
+  const refused = await outside.truncate(outside.length - 1).then(() => 'truncated!', err => err.code || err.message)
+  show(`4. truncating the signed view core of the autobase: ${refused}, fork still ${outside.fork}`, refused === 'SESSION_NOT_WRITABLE' && outside.fork === 0)
+  const length = signed.length
+  await a.view.truncate(a.view.length - 1)
+  show(`4b. truncating autobase's session works (fork ${a.view.fork}), the signed core stays at length ${signed.length} (was ${length}) fork ${signed.fork}`, signed.length === length && signed.fork === 0)
   for (const stream of streams) stream.destroy()
 }
 
@@ -76,9 +82,8 @@ async function apply (nodes, view, host) {
   }
 }
 
-// the real hypercores behind the view and the system, they only ever hold signed blocks
-function signed_core (base) { return base.view.getBackingCore().session }
-function system_core (base) { return base.system.core.getBackingCore().session }
+// the core's own state (not the session's), for an autobase view or system core thats only the signed blocks
+function signed_state (session) { return session.core.state }
 
 function connect (store_a, store_b) {
   const stream_a = store_a.replicate(true)
