@@ -4,7 +4,7 @@ our multi device disk is `autodisk` and packs are named autodisks in the vault. 
 
 ## a disk
 
-- an autodisk is a real hyperdrive built from 2 autobase views, `db` (a hyperbee with the file list) and `blobs` (the file bytes). so every device that writes to it builds the same drive, with the same keys and hashes ([lib/node_modules/autodisk](../lib/node_modules/autodisk/index.js))
+- an autodisk is a real hyperdrive built from 2 autobase views, `db` (a hyperbee with the file list) and `blobs` (the file bytes). so every device that writes to it builds the same drive, with the same keys and hashes ([lib/node_modules/autodisk](../lib/node_modules/autodisk/autodisk.js))
 - `const disk = autodisk({ store, bootstrap })`, without `bootstrap` it makes a new disk, with the autobase key of an existing one it joins it
 - the id of a disk is its autobase key. the keys of the `db` and `blobs` views change whenever the indexers change, so they are never used as an id
 
@@ -16,7 +16,7 @@ our multi device disk is `autodisk` and packs are named autodisks in the vault. 
 
 ## packs
 
-- a pack is a name in the vault, `packs/<name> = { link, namespace }`. the link is `dat://<autobase key>` without a version, so the name always means the latest ([lib/node_modules/packs](../lib/node_modules/packs/index.js))
+- a pack is a name in the vault, `packs/<name> = { link, namespace }`. the link is `dat://<autobase key>` without a version, so the name always means the latest ([lib/node_modules/packs](../lib/node_modules/packs/packs.js))
 - `create(name, folder)` copies a folder into a new disk, with `{ update: true }` into the existing one. only files with different bytes get written, files that arent in the folder anymore stay for now (deleting them comes with the loader `diff` + `sync`)
 - `pin(name)` gives the link for whatever runs the code (`bot.json`, app deps). it waits till the signed `db` core caught up, then takes `dat://<length>.<fork>.<autobase key>.<hash>` from there, the hash is the tree hash of the signed `db` core at that length
 - `remove(name)` deletes the disks cores from this device and the name from the vault. old view cores from before an indexer change arent tracked by autobase, so they stay on disk for now

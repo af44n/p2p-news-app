@@ -57,7 +57,7 @@
     "build:ds": "browserify lib/datashell.js > shim.bundle.js",
     "build:system": "browserify lib/websys-ui.js > system.bundle.js",
     "build:ui": "browserify lib/webapp-ui.js > bundle.js",
-    "relay": "node lib/node_modules/relay/index.js",
+    "relay": "node lib/node_modules/relay/relay.js",
     "resetcli": "rm -rf ./storage* && rm -rf ./.local-storage",
     "lint": "standardx",
     "lintfix": "standardx --fix",
