@@ -55,8 +55,8 @@ what we agreed: a name always means the latest, a pin only lives where code runs
 
 ## rerun on autobase 7 (18 nov)
 
-`node docs/pinning-check.js` on autobase 7.28.2, ran twice, same result
+`node docs/pinning-check.js` on autobase 7.28.2, ran twice, same result (fixed 21 nov, it prints ok / NOT ok now)
 - the system view still stores only key + length per view, and at an old length it still names the old view key at its old length. so the system core at a length still pins every view
 - when b becomes an indexer the view gets a new key, the new core starts with the old data as its prologue, and the hash at 3 is the same
-- whats new on 7: the fork number is different on each device and goes up with every reorder (a 6, b 2 in one run), but the hash at every signed length is the same on both. so a link has to pin length + hash, never the fork number
+- the signed view and system cores stay fork 0 on both devices, like on 6. on 18 nov this line said the fork is different on each device, that was wrong. the check read `base.view`, which on 7 is autobase's own session over the view core, that one forks on every reorder and differently on each device (a 5, b 1 in one run). the check reads the signed core's fork now (`base.view.core.state.fork`), and a reader that only replicates gets fork 0 from either device. the hash at every signed length is the same on both, the fork isnt in the tree hash, only in what the indexers sign
 - not checked: what all indexers together could still rewrite. they hold every signing key, so i think they could sign a different history after a length, and only someone who kept the old hash at that length would see it. thats what a hash in the audit entry would add
