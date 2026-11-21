@@ -29,6 +29,16 @@ so always 0, just that the "never" comes from nobody being able to truncate the 
 - after both wrote offline and autobase reordered, the system core up to every indexedLength seen before had the same hash, the part above it changed on both devices. so up to indexedLength the order is final for that device, signedLength is what others can check with the signatures
 - the system core always keeps a short unsigned end (a indexed 32, signed 30, length 34 while the view was fully signed), the acks that get things signed are system blocks too. so wait for the view to be signed, not the system core
 
+## a view core of another autobase as a writer
+
+`node docs/view-as-writer-check.js` (plain autobase 7, ran 3 times, all ok), for serapaths question if each users view could be an input of a shared autobase
+
+- a shared base s can add the view core of a users base u as a writer, its in s's system like any writer
+- but nothing u writes ever reaches s's view. s gets the blocks of that core, but autobase freezes that writer and reads 0 nodes from it, with no error and no warning. a writer core has to hold autobase's own nodes (each says which heads it links), a view core holds what u's apply wrote
+- s keeps working for its own writers
+- on top, a views key changes when the users indexers change (pin check), so the key s added would go stale after a device change or recovery
+- so not as is. something that turns a users view into autobase nodes, or a stable per user key like the master core, would be needed (not checked)
+
 ## what happens to the view and system cores over time
 
 `node docs/view-history-check.js` 
