@@ -8,18 +8,18 @@ const daemon = require('../lib/node_modules/daemon')
 const serve_webrtc = require('../lib/node_modules/webrtc-bridge/page')
 const { make_tx } = require('../lib/node_modules/iframe-runtime')
 
-const [role, run] = location.hash.slice(1).split(':')
+const [role, run, label] = location.hash.slice(1).split(':')
 // each device is its own subdomain of localhost, so its own origin and storage, but its one server
 const A = 'http://box1.datashell.localhost:9970'
 const B = 'http://box2.datashell.localhost:9970'
 const state = { failed: 0, checks: 0 }
 
-if (role === 'tab') serve_tab(run)
+if (role === 'tab') serve_tab(run, decodeURIComponent(label))
 else run_tests(Date.now().toString(36)).then(done, fail)
 
 async function run_tests (run) {
-  const tab1 = await open_tab(A, run)
-  const tab2 = await open_tab(A, run)
+  const tab1 = await open_tab(A, run, 'device a, tab 1')
+  const tab2 = await open_tab(A, run, 'device a, tab 2')
   // seed
   let words = []
   await tab1.authenticate({ username: 'ali', on_seed_phrase: mnemonic => { words = mnemonic.split(' ') } })
@@ -50,7 +50,7 @@ async function run_tests (run) {
   // device b pairs through the relay
   const invite = await tab1.create_vault_invite()
   const asked = new Promise(resolve => tab1.setup_vault_pairing({ invite: invite.invite, username: 'ali', on_verification_needed: resolve, on_paired () {} }))
-  const b = await open_tab(B, run)
+  const b = await open_tab(B, run, 'device b')
   const ready = new Promise(resolve => b.on_vault_ready(resolve))
   const code = await new Promise(resolve => b.authenticate({ username: 'pairing-user', invite_code: invite.invite_code, on_verification_code: resolve }))
   await asked // b's request reached a, like the verify field showing up in the ui
@@ -84,23 +84,31 @@ HELPERS
 ***************************************/
 // a tab is an iframe on the devices origin, it gives a port into the vault worker of that origin to this page,
 // like open_vault_worker in lib/datashell.js does for its own page
-async function open_tab (origin, run) {
+async function open_tab (origin, run, label) {
+  const box = document.createElement('div')
+  const caption = document.createElement('div')
+  caption.textContent = `${label} (${new URL(origin).host})`
   const frame = document.createElement('iframe')
-  frame.src = `${origin}/test/#tab:${run}`
-  await new Promise(resolve => { frame.onload = resolve; document.body.append(frame) })
+  frame.src = `${origin}/test/#tab:${run}:${encodeURIComponent(label)}`
+  box.append(caption, frame)
+  await new Promise(resolve => { frame.onload = resolve; document.body.append(box) })
   const { port1, port2 } = new MessageChannel()
   const tab = Math.random().toString(36).slice(2)
   const tx = make_tx('page')
   frame.contentWindow.postMessage(tx({ to: 'vault', type: 'tab', data: { storage: {}, input: { name: `test-${run}` }, tab } }), '*', [port2])
   serve_webrtc(port1)
-  return daemon.connect(port1, { close_tab: () => frame.remove() }, tx)
+  port1.addEventListener('message', e => { if (e.data?.type === 'rtc-page') caption.textContent += ' 📡 does the webrtc for its device' })
+  return daemon.connect(port1, { close_tab: () => box.remove() }, tx)
 }
 
 // in the tab iframe. it holds the tab lock while it lives, so the worker sees the tab close when the iframe is removed
-function serve_tab (run) {
+function serve_tab (run, label) {
   delete_old_runs(run)
+  const show = line => { document.querySelector('.results').textContent += line + '\n' }
+  show(`${label}\n${location.host}\nan iframe = a tab of this device`)
   addEventListener('message', e => {
     if (e.data?.type !== 'tab') return
+    show('gave the runner a port into this devices vault worker')
     navigator.locks.request(`datashell-tab-${e.data.data.tab}`, () => {
       new SharedWorker('/vault.bundle.js', { name: `test-${run}` }).port.postMessage(e.data, [e.ports[0]])
       return new Promise(() => {})
