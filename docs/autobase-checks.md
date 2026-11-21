@@ -19,6 +19,16 @@ on autobase 7 its the same for whats signed. the view is one hypercore now, its 
 
 so always 0, just that the "never" comes from nobody being able to truncate the signed core, not from a 0 in the code. autobase 7 has a real fork feature (`host.fork(indexers, system)`), that one isnt in this check (the recovery checks in the latest modules repo used it)
 
+## when indexedLength and signedLength move forward
+
+`node docs/index-sign-check.js` (plain autobase 7, 2 indexers, ran 5 times, all ok)
+
+- both are lengths of the system core. on every sample on both devices signedLength <= indexedLength <= length, and neither ever went down
+- indexedLength is how far this device sees the order as final, from the indexers writes it has. b offline, a wrote 5 alone, none of them got indexed (2 indexers, a needs b to link them)
+- signedLength is how far more than half of the indexers signed. autobase only signs up to its own indexedLength (`maybeSigned` in `lib/apply-state.js`)
+- after both wrote offline and autobase reordered, the system core up to every indexedLength seen before had the same hash, the part above it changed on both devices. so up to indexedLength the order is final for that device, signedLength is what others can check with the signatures
+- the system core always keeps a short unsigned end (a indexed 32, signed 30, length 34 while the view was fully signed), the acks that get things signed are system blocks too. so wait for the view to be signed, not the system core
+
 ## what happens to the view and system cores over time
 
 `node docs/view-history-check.js` 
